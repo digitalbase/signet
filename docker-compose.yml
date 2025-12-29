@@ -15,8 +15,8 @@ services:
       AUTH_PORT: 3000
       #AUTH_HOST: ${AUTH_HOST:-0.0.0.0}
       BASE_URL: ${BASE_URL:-http://localhost:4174}
-    #ports:
-    #  - "3174:3000"
+    ports:
+      - "100.113.147.36:3174:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health >/dev/null 2>&1 || exit 1"]
       interval: 10s
@@ -36,8 +36,9 @@ services:
       PORT: 4174
       HOST: 0.0.0.0
       DAEMON_URL: ${DAEMON_URL:-http://localhost:4174}
-    #ports:
-     # - "${UI_PORT:-4174}:4174"
+    ports:
+      - "100.113.147.36:4174:4174"
+      #- "${UI_PORT:-4174}:4174"
 
 volumes:
   signet_config: {}
