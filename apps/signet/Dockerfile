@@ -67,7 +67,7 @@ RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app/apps/signet
 ENV DATABASE_URL="file:/app/config/signet.db"
 
-EXPOSE 3000
+EXPOSE 3174
 
 ENTRYPOINT ["./entrypoint.sh"]
 CMD ["start", "--config", "/app/config/signet.json"]
