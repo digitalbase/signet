@@ -12,10 +12,11 @@ services:
       - signet_config:/app/config
     environment:
       DATABASE_URL: file:/app/config/signet.db
-      AUTH_PORT: 3174
+      AUTH_PORT: ${AUTH_PORT:-3742}
+      AUTH_HOST: ${AUTH_HOST:-0.0.0.0}
       BASE_URL: ${BASE_URL:-http://localhost:4174}
-#    ports:
-#      - "3174:3000"
+    ports:
+      - "3174:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health >/dev/null 2>&1 || exit 1"]
       interval: 10s
