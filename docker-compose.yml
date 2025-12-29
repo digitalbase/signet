@@ -33,10 +33,10 @@ services:
         condition: service_healthy
     environment:
       - PORT=4174
-      - HOST=signer.lifelog.be
+      - HOST=0.0.0.0
       - DAEMON_URL=https://one.lifelog.be
-    ports:
-      - "${UI_PORT:-4174}:4174"
+    #ports:
+     # - "${UI_PORT:-4174}:4174"
 
 volumes:
   signet_config: {}
