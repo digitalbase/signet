@@ -9,15 +9,15 @@ services:
     mem_limit: 256mb
     memswap_limit: 256mb
     volumes:
-      - $HOME/.signet-config:/app/config
+      - haven_config:/app/config
     environment:
       DATABASE_URL: file:/app/config/signet.db
-      AUTH_PORT: 3000
+      AUTH_PORT: 3174
       BASE_URL: ${BASE_URL:-http://localhost:4174}
     ports:
-      - "${AUTH_PORT:-3000}:3000"
+      - "${AUTH_PORT:-3174}:3174"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3174/health >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -34,6 +34,10 @@ services:
     environment:
       - PORT=4174
       - HOST=0.0.0.0
-      - DAEMON_URL=http://signet:3000
+      - DAEMON_URL=http://signet:3174
     ports:
       - "${UI_PORT:-4174}:4174"
+
+volumes:
+  signet_config: {}
+  signet_db: {}
