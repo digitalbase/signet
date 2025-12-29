@@ -275,11 +275,13 @@ class Daemon {
             return;
         }
 
+        const host = this.config.authHost ?? process.env.AUTH_HOST ?? '0.0.0.0';
+
         const baseUrl = this.config.baseUrl ?? process.env.BASE_URL;
-        console.log(`🌐 Starting HTTP server on port ${authPort}...`);
+        console.log(`🌐 Starting HTTP server on ${host}:${authPort}...`);
         this.httpServer = new HttpServer({
             port: authPort,
-            host: this.config.authHost ?? process.env.AUTH_HOST ?? '0.0.0.0',
+            host,
             baseUrl,
             jwtSecret: this.config.jwtSecret,
             allowedOrigins: this.config.allowedOrigins ?? [],
