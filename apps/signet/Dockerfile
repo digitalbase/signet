@@ -71,7 +71,7 @@ ENV DATABASE_URL="file:/app/config/signet.db"
 ENV SIGNET_PORT=3000
 ENV SIGNET_HOST=0.0.0.0
 
-EXPOSE 3174
+EXPOSE 3000
 
 ENTRYPOINT ["./entrypoint.sh"]
 CMD ["start", "--config", "/app/config/signet.json"]
