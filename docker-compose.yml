@@ -34,7 +34,7 @@ services:
     environment:
       - PORT=4174
       - HOST=0.0.0.0
-      - DAEMON_URL=http://signet:3000
+      - DAEMON_URL=https://signer.lifelog.be:3174
     ports:
       - "${UI_PORT:-4174}:4174"
 
