@@ -11,12 +11,12 @@ services:
     volumes:
       - signet_config:/app/config
     environment:
-      DATABASE_URL: file:/app/config/signet.db
-      AUTH_PORT: 3174
-      #AUTH_HOST: ${AUTH_HOST:-0.0.0.0}
-      BASE_URL: ${BASE_URL:-http://localhost:4174}
+      DATABASE_URL: ${DATABASE_URL:-file:/app/config/signet.db}
+      SIGNET_PORT: ${SIGNET_PORT:-3000}
+      SIGNET_HOST: ${SIGNET_HOST:-0.0.0.0}
+      EXTERNAL_URL: ${EXTERNAL_URL:-http://localhost:4174}
     ports:
-      - "100.113.147.36:3174:3000"
+      - "${SIGNET_PORT:-3000}:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health >/dev/null 2>&1 || exit 1"]
       interval: 10s
@@ -33,9 +33,9 @@ services:
       signet:
         condition: service_healthy
     environment:
-      PORT: 4174
-      HOST: 0.0.0.0
-      DAEMON_URL: ${DAEMON_URL:-http://localhost:4174}
+      UI_PORT: ${UI_PORT:-4174}
+      UI_HOST: ${UI_HOST:-0.0.0.0}
+      DAEMON_URL: ${DAEMON_URL:-http://signet:3000}
     ports:
       - "100.113.147.36:4174:4174"
       #- "${UI_PORT:-4174}:4174"

@@ -141,15 +141,28 @@ Rate limits are per-IP address. After exceeding the limit, requests receive HTTP
 Docker Compose works out of the box with no `.env` file required. To customize settings, set these environment variables before running `docker compose`:
 
 ```bash
-AUTH_PORT=3001 UI_PORT=8080 BASE_URL=https://signet.example.com docker compose up --build
+SIGNET_PORT=3001 UI_PORT=8080 EXTERNAL_URL=https://signet.example.com docker compose up --build
 ```
+
+### Daemon Variables (`signet`)
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `AUTH_PORT` | External port for the REST API | `3000` |
-| `UI_PORT` | External port for the React UI | `4174` |
-| `BASE_URL` | Public URL of the UI (for authorization flow) | `http://localhost:4174` |
+| `SIGNET_PORT` | Port for the REST API | `3000` |
+| `SIGNET_HOST` | Host binding for the REST API | `0.0.0.0` |
+| `EXTERNAL_URL` | Public URL of the UI (for authorization flow) | `http://localhost:4174` |
+| `DATABASE_URL` | SQLite database path | `file:/app/config/signet.db` |
 
-The `BASE_URL` environment variable is particularly important for Docker deployments. It tells Signet where to redirect users for request approval. If not set in the config file, the daemon will use this environment variable.
+### UI Variables (`signet-ui`)
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `UI_PORT` | Port for the React UI | `4174` |
+| `UI_HOST` | Host binding for the UI server | `0.0.0.0` |
+| `DAEMON_URL` | Internal URL to reach the daemon | `http://localhost:3000` |
+
+The `EXTERNAL_URL` environment variable is particularly important for Docker deployments. It tells Signet where to redirect users for request approval. If not set in the config file, the daemon will use this environment variable.
+
+> **Note:** Legacy variable names (`AUTH_PORT`, `AUTH_HOST`, `BASE_URL`, `PORT`, `HOST`) are still supported for backward compatibility but are deprecated.
 
 All other settings are configured in `signet.json`.

@@ -19,8 +19,11 @@ COPY --from=build /app/apps/signet-ui/dist ./dist
 COPY --from=build /app/apps/signet-ui/server.mjs ./server.mjs
 # Install server dependencies
 RUN npm install express http-proxy-middleware
-ENV PORT=4174
-ENV HOST=0.0.0.0
+
+# Environment variables (can be overridden at runtime)
+ENV UI_PORT=4174
+ENV UI_HOST=0.0.0.0
 ENV DAEMON_URL=http://signet:3000
+
 EXPOSE 4174
 CMD ["node", "server.mjs"]

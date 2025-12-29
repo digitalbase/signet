@@ -8,9 +8,10 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-const port = Number.parseInt(process.env.PORT ?? '4174', 10);
-const host = process.env.HOST ?? '0.0.0.0';
-const daemonUrl = process.env.DAEMON_URL ?? 'http://signet:3000';
+// Support both new (UI_*) and legacy (PORT/HOST) env var names
+const port = Number.parseInt(process.env.UI_PORT ?? process.env.PORT ?? '4174', 10);
+const host = process.env.UI_HOST ?? process.env.HOST ?? '0.0.0.0';
+const daemonUrl = process.env.DAEMON_URL ?? 'http://localhost:3000';
 
 // SSE-specific proxy for /events endpoint (no timeout, streaming)
 const sseProxy = createProxyMiddleware({

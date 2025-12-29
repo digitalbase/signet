@@ -19,7 +19,7 @@
 - **Repository Layer** - Database access layer with batch query methods (eliminates N+1 queries)
 - **ACL Caching** - 30-second TTL cache for permission lookups with automatic invalidation
 - **Config Options** - `jwtSecret`, `allowedOrigins`, `requireAuth` for security configuration
-- **Environment Variables** - `BASE_URL` support for Docker deployments
+- **Environment Variables** - Improved Docker environment variable naming with service prefixes (`SIGNET_PORT`, `SIGNET_HOST`, `EXTERNAL_URL`, `UI_PORT`, `UI_HOST`, `DAEMON_URL`); legacy names still supported
 
 ### Changed
 
@@ -49,6 +49,7 @@
 - Docker Alpine compatibility for `better-sqlite3` native module
 - Unhandled promises and swallowed errors in authorization polling
 - Database cleanup errors now logged instead of silently ignored
+- NIP-46 subscriptions not recovering after sleep/wake cycles - subscription lifecycle now managed explicitly with automatic restart on relay reconnection
 
 ### Security
 

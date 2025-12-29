@@ -65,7 +65,11 @@ RUN chmod +x ./apps/signet/entrypoint.sh
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /app/apps/signet
+
+# Environment variables (can be overridden at runtime)
 ENV DATABASE_URL="file:/app/config/signet.db"
+ENV SIGNET_PORT=3000
+ENV SIGNET_HOST=0.0.0.0
 
 EXPOSE 3174
 

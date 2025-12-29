@@ -9,16 +9,8 @@ function resolveConnectionInfoUrl(): string {
     return fromEnv;
   }
 
-  try {
-    const current = new URL(window.location.href);
-    current.port = '3000';
-    current.pathname = '/connection';
-    current.search = '';
-    current.hash = '';
-    return current.toString();
-  } catch {
-    return 'http://localhost:3000/connection';
-  }
+  // Use relative URL so it goes through the proxy (vite dev or production server.mjs)
+  return '/connection';
 }
 
 export async function fetchConnectionInfo(): Promise<ConnectionInfo | null> {

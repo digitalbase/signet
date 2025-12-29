@@ -2,7 +2,9 @@ import NDK, {
     NDKEvent,
     NDKNip46Backend,
     NDKPrivateKeySigner,
+    NDKRelay,
     NDKRelaySet,
+    NDKSubscription,
     Nip46PermitCallback,
 } from '@nostr-dev-kit/ndk';
 import { nip19 } from 'nostr-tools';
@@ -10,6 +12,10 @@ import type { FastifyInstance } from 'fastify';
 import prisma from '../db.js';
 import { getEventService } from './services/event-service.js';
 import { appService } from './services/app-service.js';
+
+// Subscription management constants
+const SUBSCRIPTION_RESTART_DEBOUNCE_MS = 2000; // Debounce relay:ready events
+const SUBSCRIPTION_RESTART_DELAY_MS = 500; // Brief delay before restarting subscription
 
 // Default trust level for auto-approved connections via secret
 const DEFAULT_TRUST_LEVEL = 'reasonable';
@@ -25,6 +31,13 @@ export class BunkerBackend extends NDKNip46Backend {
     private readonly keyName: string;
     private readonly adminSecret?: string;
 
+    // Subscription lifecycle management
+    private subscription: NDKSubscription | null = null;
+    private isStarted = false;
+    private isRestarting = false;
+    private restartDebounceTimer: NodeJS.Timeout | null = null;
+    private relayReadyHandler: ((relay: NDKRelay) => void) | null = null;
+
     constructor(
         ndk: NDK,
         fastify: FastifyInstance,
@@ -39,6 +52,166 @@ export class BunkerBackend extends NDKNip46Backend {
         this.keyName = config.keyName;
         this.adminSecret = config.adminSecret;
         this.baseUrl = baseUrl;
+    }
+
+    /**
+     * Override start() to manage subscription lifecycle ourselves.
+     * This ensures we can track and restart the subscription when relays reconnect.
+     */
+    public async start(): Promise<void> {
+        if (this.isStarted) {
+            console.log(`⚠️ [${this.keyName}] Backend already started, ignoring duplicate start()`);
+            return;
+        }
+
+        this.localUser = await this.signer.user();
+        const pubkey = this.localUser.pubkey;
+        const npub = nip19.npubEncode(pubkey);
+
+        console.log(`🔑 [${this.keyName}] Starting NIP-46 backend for ${npub}`);
+
+        // Create the subscription
+        await this.createSubscription();
+
+        // Set up relay:ready handler to detect reconnections
+        this.setupRelayEventHandlers();
+
+        this.isStarted = true;
+        console.log(`✅ [${this.keyName}] NIP-46 subscription active`);
+    }
+
+    /**
+     * Stop the backend and clean up resources.
+     */
+    public stop(): void {
+        if (!this.isStarted) {
+            return;
+        }
+
+        console.log(`🛑 [${this.keyName}] Stopping NIP-46 backend`);
+
+        // Remove relay event handler
+        if (this.relayReadyHandler) {
+            this.ndk.pool.off('relay:ready', this.relayReadyHandler);
+            this.relayReadyHandler = null;
+        }
+
+        // Clear any pending restart
+        if (this.restartDebounceTimer) {
+            clearTimeout(this.restartDebounceTimer);
+            this.restartDebounceTimer = null;
+        }
+
+        // Close the subscription
+        if (this.subscription) {
+            this.subscription.stop();
+            this.subscription = null;
+        }
+
+        this.isStarted = false;
+    }
+
+    /**
+     * Create the NIP-46 subscription for incoming requests.
+     */
+    private async createSubscription(): Promise<void> {
+        if (!this.localUser) {
+            throw new Error('Cannot create subscription: localUser not set');
+        }
+
+        // Close existing subscription if any
+        if (this.subscription) {
+            this.debug('closing existing subscription before creating new one');
+            this.subscription.stop();
+            this.subscription = null;
+        }
+
+        const pubkey = this.localUser.pubkey;
+
+        this.subscription = this.ndk.subscribe(
+            {
+                kinds: [24133 as number],
+                '#p': [pubkey],
+            },
+            {
+                closeOnEose: false,
+            }
+        );
+
+        // Handle incoming events
+        this.subscription.on('event', (event: NDKEvent) => {
+            this.handleIncomingEvent(event).catch((err) => {
+                console.error(`❌ [${this.keyName}] Error handling incoming event:`, err);
+            });
+        });
+
+        this.debug('subscription created for pubkey %s', pubkey);
+    }
+
+    /**
+     * Set up handlers for relay events to detect when relays reconnect.
+     */
+    private setupRelayEventHandlers(): void {
+        // Create the handler function so we can remove it later
+        this.relayReadyHandler = (relay: NDKRelay) => {
+            this.handleRelayReady(relay);
+        };
+
+        this.ndk.pool.on('relay:ready', this.relayReadyHandler);
+        this.debug('relay event handlers set up');
+    }
+
+    /**
+     * Handle relay:ready events.
+     * When a relay becomes ready, we should ensure our subscription is active on it.
+     * We debounce this to avoid multiple restarts when several relays reconnect at once.
+     */
+    private handleRelayReady(relay: NDKRelay): void {
+        // Only care about reconnections after initial start
+        if (!this.isStarted || this.isRestarting) {
+            return;
+        }
+
+        console.log(`📡 [${this.keyName}] Relay ready: ${relay.url} - scheduling subscription refresh`);
+
+        // Debounce: wait for all relays to reconnect before restarting
+        if (this.restartDebounceTimer) {
+            clearTimeout(this.restartDebounceTimer);
+        }
+
+        this.restartDebounceTimer = setTimeout(() => {
+            this.restartDebounceTimer = null;
+            this.restartSubscription().catch((err) => {
+                console.error(`❌ [${this.keyName}] Failed to restart subscription:`, err);
+            });
+        }, SUBSCRIPTION_RESTART_DEBOUNCE_MS);
+    }
+
+    /**
+     * Restart the subscription to ensure it's active on all connected relays.
+     * This is called after relays reconnect.
+     */
+    private async restartSubscription(): Promise<void> {
+        if (!this.isStarted || this.isRestarting) {
+            return;
+        }
+
+        this.isRestarting = true;
+        console.log(`🔄 [${this.keyName}] Restarting NIP-46 subscription after relay reconnection`);
+
+        try {
+            // Brief delay to let relay connections stabilize
+            await new Promise((resolve) => setTimeout(resolve, SUBSCRIPTION_RESTART_DELAY_MS));
+
+            // Re-create the subscription
+            await this.createSubscription();
+
+            console.log(`✅ [${this.keyName}] NIP-46 subscription restarted successfully`);
+        } catch (err) {
+            console.error(`❌ [${this.keyName}] Failed to restart subscription:`, err);
+        } finally {
+            this.isRestarting = false;
+        }
     }
 
     /**
