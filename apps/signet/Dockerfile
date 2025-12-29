@@ -34,7 +34,6 @@ RUN pnpm build
 
 WORKDIR /app/apps/signet
 ENV DATABASE_URL="file:/app/config/signet.db"
-ENV AUTH_PORT=3174
 RUN pnpm prisma generate
 RUN pnpm build
 
