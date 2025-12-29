@@ -9,7 +9,7 @@ services:
     mem_limit: 256mb
     memswap_limit: 256mb
     volumes:
-      - haven_config:/app/config
+      - signet_config:/app/config
     environment:
       DATABASE_URL: file:/app/config/signet.db
       AUTH_PORT: 3174
