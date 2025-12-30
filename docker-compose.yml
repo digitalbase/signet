@@ -16,7 +16,7 @@ services:
       SIGNET_HOST: ${SIGNET_HOST:-0.0.0.0}
       EXTERNAL_URL: ${EXTERNAL_URL:-http://localhost:4174}
     ports:
-      - "100.113.147.36:3174:3174"
+      - "100.113.147.36:3174:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health >/dev/null 2>&1 || exit 1"]
       interval: 10s
