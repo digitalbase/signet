@@ -1,8 +1,9 @@
-import type { NDKEvent } from '@nostr-dev-kit/ndk';
+import type { Event } from 'nostr-tools/pure';
 import createDebug from 'debug';
 import prisma from '../db.js';
 import type { ConnectionManager } from './connection-manager.js';
 import { getEventService } from './services/event-service.js';
+import { requestRepository } from './repositories/request-repository.js';
 import type { PendingRequest } from '@signet/types';
 import {
     POLL_INITIAL_INTERVAL_MS,
@@ -16,7 +17,7 @@ const debug = createDebug('signet:authorize');
 
 let cachedBaseUrl: string | null | undefined;
 
-function serialiseParam(payload?: string | NDKEvent): string | undefined {
+function serialiseParam(payload?: string | Event): string | undefined {
     if (!payload) {
         return undefined;
     }
@@ -26,7 +27,7 @@ function serialiseParam(payload?: string | NDKEvent): string | undefined {
     }
 
     try {
-        return JSON.stringify(payload.rawEvent());
+        return JSON.stringify(payload);
     } catch {
         return undefined;
     }
@@ -37,9 +38,19 @@ async function persistRequest(
     requestId: string,
     remotePubkey: string,
     method: string,
-    payload?: string | NDKEvent
+    payload?: string | Event
 ) {
     const params = serialiseParam(payload);
+
+    // Look up keyUserId for non-connect requests (connect creates the KeyUser on approval)
+    let keyUserId: number | undefined;
+    if (method !== 'connect' && keyName) {
+        const foundId = await requestRepository.findKeyUserId(keyName, remotePubkey);
+        if (foundId) {
+            keyUserId = foundId;
+        }
+    }
+
     const record = await prisma.request.create({
         data: {
             keyName,
@@ -47,7 +58,9 @@ async function persistRequest(
             remotePubkey,
             method,
             params,
+            keyUserId,
         },
+        include: { KeyUser: true },
     });
 
     // Emit event for real-time updates
@@ -84,6 +97,8 @@ async function persistRequest(
         ttlSeconds: Math.round(REQUEST_EXPIRY_MS / 1000),
         requiresPassword: false, // Will be determined by the UI
         processedAt: null,
+        autoApproved: false,
+        appName: record.KeyUser?.description ?? null,
     });
 
     // Schedule expiry notification - don't delete the record, keep for history
@@ -201,7 +216,7 @@ export async function requestAuthorization(
     remotePubkey: string,
     requestId: string,
     method: string,
-    payload?: string | NDKEvent
+    payload?: string | Event
 ): Promise<string | undefined> {
     const record = await persistRequest(keyName, requestId, remotePubkey, method, payload);
     const baseUrl = await resolveBaseUrl(connectionManager);
@@ -214,7 +229,7 @@ export async function requestAuthorization(
 
     // Ensure relay connections are active before sending auth_url
     await connectionManager.ensureConnected();
-    connectionManager.rpc.sendResponse(requestId, remotePubkey, 'auth_url', undefined, url);
+    await connectionManager.sendResponse(requestId, remotePubkey, 'auth_url', undefined, url);
 
     return await awaitWebDecision(record.id);
 }

@@ -43,23 +43,3 @@ export function sendError(reply: FastifyReply, error: unknown): FastifyReply {
     const status = getErrorStatus(message);
     return reply.code(status).send({ error: message });
 }
-
-/**
- * Higher-order function to wrap a route handler with error handling.
- * Automatically catches errors and sends appropriate responses.
- */
-export function withErrorHandler<T>(
-    handler: (request: any, reply: FastifyReply) => Promise<T>
-): (request: any, reply: FastifyReply) => Promise<T | FastifyReply> {
-    return async (request, reply) => {
-        try {
-            return await handler(request, reply);
-        } catch (error) {
-            const status = getErrorStatus((error as Error).message);
-            if (status === 500) {
-                console.error('Unhandled route error:', error);
-            }
-            return sendError(reply, error);
-        }
-    };
-}

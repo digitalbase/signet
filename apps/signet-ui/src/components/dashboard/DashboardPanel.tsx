@@ -10,6 +10,8 @@ interface DashboardPanelProps {
   activity: ActivityEntry[];
   loading: boolean;
   error: string | null;
+  showAutoApproved: boolean;
+  onToggleShowAutoApproved: () => void;
 }
 
 function getActivityIcon(type: string) {
@@ -23,7 +25,7 @@ function getActivityIcon(type: string) {
   }
 }
 
-export function DashboardPanel({ stats, activity, loading, error }: DashboardPanelProps) {
+export function DashboardPanel({ stats, activity, loading, error, showAutoApproved, onToggleShowAutoApproved }: DashboardPanelProps) {
   if (loading && !stats) {
     return <LoadingSpinner text="Loading dashboard..." />;
   }
@@ -37,6 +39,9 @@ export function DashboardPanel({ stats, activity, loading, error }: DashboardPan
   }
 
   const now = Date.now();
+  const filteredActivity = showAutoApproved
+    ? activity
+    : activity.filter(entry => !entry.autoApproved);
 
   return (
     <div className={styles.container}>
@@ -66,12 +71,24 @@ export function DashboardPanel({ stats, activity, loading, error }: DashboardPan
       )}
 
       <div className={styles.activitySection}>
-        <h3 className={styles.sectionTitle}>Recent Activity</h3>
-        {activity.length === 0 ? (
-          <div className={styles.emptyState}>No recent activity</div>
+        <div className={styles.sectionHeader}>
+          <h3 className={styles.sectionTitle}>Recent Activity</h3>
+          <label className={styles.filterToggle}>
+            <input
+              type="checkbox"
+              checked={showAutoApproved}
+              onChange={onToggleShowAutoApproved}
+            />
+            <span>Show auto-approved</span>
+          </label>
+        </div>
+        {filteredActivity.length === 0 ? (
+          <div className={styles.emptyState}>
+            {activity.length === 0 ? 'No recent activity' : 'No manual approvals'}
+          </div>
         ) : (
           <div className={styles.activityList}>
-            {activity.map(entry => {
+            {filteredActivity.map(entry => {
               const Icon = getActivityIcon(entry.type);
               return (
                 <div key={entry.id} className={styles.activityItem}>
@@ -80,6 +97,7 @@ export function DashboardPanel({ stats, activity, loading, error }: DashboardPan
                   </div>
                   <div className={styles.activityContent}>
                     <span className={styles.activityType}>{entry.type}</span>
+                    {entry.autoApproved && <span className={styles.autoBadge}>Auto</span>}
                     {entry.method && <span className={styles.activityMethod}>{entry.method}</span>}
                     {entry.keyName && <span className={styles.activityKey}>{entry.keyName}</span>}
                   </div>

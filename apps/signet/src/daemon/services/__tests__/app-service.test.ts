@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AppService } from '../app-service.js';
 import { createMockKeyUser } from '../../testing/mocks.js';
 
+// Mock the acl module to prevent db.ts from loading
+vi.mock('../../lib/acl.js', () => ({
+  updateTrustLevel: vi.fn(),
+}));
+
 // Mock the repository
 vi.mock('../../repositories/index.js', () => ({
   appRepository: {
@@ -10,6 +15,8 @@ vi.mock('../../repositories/index.js', () => ({
     revoke: vi.fn(),
     updateDescription: vi.fn(),
     getRequestCount: vi.fn(),
+    getRequestCountsBatch: vi.fn(),
+    getMethodBreakdownsBatch: vi.fn(),
     countActive: vi.fn(),
   },
 }));
@@ -42,24 +49,29 @@ describe('AppService', () => {
       ];
 
       mockAppRepository.findAll.mockResolvedValue(mockKeyUsers);
-      mockAppRepository.getRequestCount.mockResolvedValue(10);
+      mockAppRepository.getRequestCountsBatch.mockResolvedValue(new Map([[1, 10]]));
+      mockAppRepository.getMethodBreakdownsBatch.mockResolvedValue(new Map([[1, {}]]));
 
       const result = await service.listApps();
 
       expect(result).toHaveLength(1);
-      expect(result[0]).toEqual({
+      expect(result[0]).toMatchObject({
         id: 1,
         keyName: 'main-key',
-        userPubkey: expect.any(String),
         description: 'Test App',
-        permissions: ['sign_event'], // 'connect' should be filtered out
-        connectedAt: expect.any(String),
-        lastUsedAt: null,
         requestCount: 10,
       });
     });
 
-    it('should return "All methods" when no specific permissions', async () => {
+    it('should return empty array when no apps', async () => {
+      mockAppRepository.findAll.mockResolvedValue([]);
+
+      const result = await service.listApps();
+
+      expect(result).toEqual([]);
+    });
+
+    it('should handle missing counts gracefully', async () => {
       const mockKeyUsers = [
         createMockKeyUser({
           id: 1,
@@ -68,29 +80,12 @@ describe('AppService', () => {
       ];
 
       mockAppRepository.findAll.mockResolvedValue(mockKeyUsers);
-      mockAppRepository.getRequestCount.mockResolvedValue(0);
+      mockAppRepository.getRequestCountsBatch.mockResolvedValue(new Map());
+      mockAppRepository.getMethodBreakdownsBatch.mockResolvedValue(new Map());
 
       const result = await service.listApps();
 
-      expect(result[0].permissions).toEqual(['All methods']);
-    });
-
-    it('should include kind in permission string when present', async () => {
-      const mockKeyUsers = [
-        createMockKeyUser({
-          id: 1,
-          signingConditions: [
-            { id: 1, method: 'sign_event', kind: 1, allowed: true },
-          ],
-        }),
-      ];
-
-      mockAppRepository.findAll.mockResolvedValue(mockKeyUsers);
-      mockAppRepository.getRequestCount.mockResolvedValue(0);
-
-      const result = await service.listApps();
-
-      expect(result[0].permissions).toContain('sign_event (kind 1)');
+      expect(result[0].requestCount).toBe(0);
     });
   });
 

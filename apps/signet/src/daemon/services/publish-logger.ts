@@ -1,12 +1,12 @@
-import type NDK from '@nostr-dev-kit/ndk';
-import type { NDKEvent, NDKRelay } from '@nostr-dev-kit/ndk';
+import type { Event } from 'nostr-tools/pure';
+import type { RelayPool } from '../lib/relay-pool.js';
 
 /**
  * Logs NIP-46 response publishing for debugging.
- * Hooks into NDK's event publishing to track success/failure.
+ * Hooks into RelayPool's publish callbacks to track success/failure.
  */
 export class PublishLogger {
-    private readonly ndk: NDK;
+    private readonly pool: RelayPool;
     private enabled = false;
 
     // Track publish stats
@@ -16,8 +16,8 @@ export class PublishLogger {
         byRelay: new Map<string, { published: number; failed: number }>(),
     };
 
-    constructor(ndk: NDK) {
-        this.ndk = ndk;
+    constructor(pool: RelayPool) {
+        this.pool = pool;
     }
 
     /**
@@ -29,16 +29,32 @@ export class PublishLogger {
         }
 
         this.enabled = true;
-        this.setupListeners();
-        console.log('📝 Publish logging enabled');
+
+        // Initialize stats for all relays
+        for (const url of this.pool.getRelays()) {
+            this.stats.byRelay.set(url, { published: 0, failed: 0 });
+        }
+
+        // Set up publish callbacks
+        this.pool.setPublishCallbacks(
+            (event: Event, relay: string) => this.onPublishSuccess(event, relay),
+            (event: Event, relay: string, error: Error) => this.onPublishFailure(event, relay, error)
+        );
+
+        console.log('Publish logging enabled');
     }
 
     /**
      * Stop logging publish events
      */
     public stop(): void {
+        if (!this.enabled) {
+            return;
+        }
+
         this.enabled = false;
-        console.log('📝 Publish logging disabled');
+        this.pool.setPublishCallbacks(undefined, undefined);
+        console.log('Publish logging disabled');
     }
 
     /**
@@ -60,62 +76,46 @@ export class PublishLogger {
             totalFailed: 0,
             byRelay: new Map(),
         };
-    }
 
-    private setupListeners(): void {
-        // Listen to relay-level events
-        console.log(`📝 Attaching publish listeners to ${this.ndk.pool.relays.size} relays`);
-        for (const [url, relay] of this.ndk.pool.relays) {
-            this.attachRelayListeners(relay);
-        }
-
-        // Also listen for new relays being added
-        this.ndk.pool.on('relay:connect', (relay: NDKRelay) => {
-            console.log(`📝 New relay connected, attaching listeners: ${relay.url}`);
-            this.attachRelayListeners(relay);
-        });
-    }
-
-    private attachRelayListeners(relay: NDKRelay): void {
-        const url = relay.url;
-
-        // Initialize stats for this relay
-        if (!this.stats.byRelay.has(url)) {
+        // Re-initialize for all relays
+        for (const url of this.pool.getRelays()) {
             this.stats.byRelay.set(url, { published: 0, failed: 0 });
         }
+    }
 
-        relay.on('published', (event: NDKEvent) => {
-            if (!this.enabled) return;
+    private onPublishSuccess(event: Event, relay: string): void {
+        if (!this.enabled) return;
 
-            this.stats.totalPublished++;
-            const relayStat = this.stats.byRelay.get(url);
-            if (relayStat) {
-                relayStat.published++;
-            }
+        this.stats.totalPublished++;
+        const relayStat = this.stats.byRelay.get(relay);
+        if (relayStat) {
+            relayStat.published++;
+        } else {
+            this.stats.byRelay.set(relay, { published: 1, failed: 0 });
+        }
 
-            // Log all published events for debugging
-            console.log(`📤 Published kind ${event.kind} to ${url} (id: ${event.id?.slice(0, 8)}...)`);
-        });
+        console.log(`Published kind ${event.kind} to ${relay} (id: ${event.id?.slice(0, 8)}...)`);
+    }
 
-        relay.on('publish:failed', (event: NDKEvent, error: Error) => {
-            if (!this.enabled) return;
+    private onPublishFailure(event: Event, relay: string, error: Error): void {
+        if (!this.enabled) return;
 
-            this.stats.totalFailed++;
-            const relayStat = this.stats.byRelay.get(url);
-            if (relayStat) {
-                relayStat.failed++;
-            }
+        this.stats.totalFailed++;
+        const relayStat = this.stats.byRelay.get(relay);
+        if (relayStat) {
+            relayStat.failed++;
+        } else {
+            this.stats.byRelay.set(relay, { published: 0, failed: 1 });
+        }
 
-            // Log all failed events for debugging
-            console.log(`❌ FAILED kind ${event.kind} to ${url}: ${error.message} (id: ${event.id?.slice(0, 8)}...)`);
-        });
+        console.log(`FAILED kind ${event.kind} to ${relay}: ${error.message} (id: ${event.id?.slice(0, 8)}...)`);
     }
 
     /**
      * Print a summary of publish stats
      */
     public printSummary(): void {
-        console.log('\n📊 Publish Statistics:');
+        console.log('\nPublish Statistics:');
         console.log(`   Total published: ${this.stats.totalPublished}`);
         console.log(`   Total failed: ${this.stats.totalFailed}`);
         console.log('   By relay:');

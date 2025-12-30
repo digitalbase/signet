@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import type { DisplayRequest, RequestMeta, TrustLevel } from '@signet/types';
-import { getEventKindLabel, getMethodInfo, getTrustLevelInfo } from '../../lib/event-labels.js';
+import { getKindLabel, getTrustLevelBehavior, parseConnectPermissions, formatPermission } from '@signet/types';
+import { getMethodInfo, getTrustLevelInfo } from '../../lib/event-labels.js';
 import { formatTtl, truncateContent } from '../../lib/formatters.js';
 import styles from './RequestCard.module.css';
 
@@ -11,7 +12,7 @@ interface RequestCardProps {
   selectionMode: boolean;
   selected: boolean;
   onPasswordChange: (password: string) => void;
-  onApprove: (trustLevel?: TrustLevel, alwaysAllow?: boolean) => void;
+  onApprove: (trustLevel?: TrustLevel, alwaysAllow?: boolean, allowKind?: number) => void;
   onSelect: () => void;
   onViewDetails: () => void;
 }
@@ -38,8 +39,25 @@ export function RequestCard({
   const trustLevels: TrustLevel[] = ['paranoid', 'reasonable', 'full'];
 
   // For completed events, show event kind inline
-  const eventKindLabel = request.eventPreview ? getEventKindLabel(request.eventPreview.kind) : null;
+  const eventKind = request.eventPreview?.kind;
+  const eventKindLabel = eventKind !== undefined ? getKindLabel(eventKind) : null;
   const showCompact = !isPending;
+
+  // Parse requested permissions from connect params
+  const requestedPermissions = useMemo(() => {
+    if (request.method !== 'connect' || !request.params) return [];
+    try {
+      const params = JSON.parse(request.params);
+      // NIP-46 connect params: [pubkey, secret?, perms?]
+      const permsStr = Array.isArray(params) ? params[2] : undefined;
+      return parseConnectPermissions(permsStr);
+    } catch {
+      return [];
+    }
+  }, [request.method, request.params]);
+
+  // Get behavior for selected trust level
+  const trustBehavior = getTrustLevelBehavior(selectedTrustLevel);
 
   return (
     <div className={`${styles.card} ${styles[request.state]} ${showCompact ? styles.compact : ''}`}>
@@ -63,13 +81,6 @@ export function RequestCard({
           </span>
         </div>
         <div className={styles.headerRight}>
-          <button
-            className={styles.detailsButton}
-            onClick={onViewDetails}
-            aria-label="View request details"
-          >
-            Details
-          </button>
           <div className={styles.status}>
             {request.state === 'pending' && (
               <span className={styles.ttl}>{formatTtl(request.ttl)}</span>
@@ -78,9 +89,18 @@ export function RequestCard({
               <span className={styles.expired}>Expired</span>
             )}
             {request.state === 'approved' && (
-              <span className={styles.approved}>Approved</span>
+              <span className={request.autoApproved ? styles.autoApproved : styles.approved}>
+                {request.autoApproved ? 'Auto Approved' : 'Approved'}
+              </span>
             )}
           </div>
+          <button
+            className={styles.detailsButton}
+            onClick={onViewDetails}
+            aria-label="View request details"
+          >
+            Details
+          </button>
         </div>
       </div>
 
@@ -90,8 +110,8 @@ export function RequestCard({
             <span className={styles.keyName}>{request.keyName}</span>
           )}
           <span className={styles.separator}>•</span>
-          <span className={styles.npub} title={request.remotePubkey}>
-            {request.npub.slice(0, 12)}...{request.npub.slice(-6)}
+          <span className={styles.npub} title={request.npub}>
+            {request.appName || `${request.npub.slice(0, 12)}...${request.npub.slice(-6)}`}
           </span>
           <span className={styles.separator}>•</span>
           <span className={styles.time}>{request.createdLabel}</span>
@@ -100,7 +120,7 @@ export function RequestCard({
         {isPending && request.eventPreview && (
           <div className={styles.eventPreview}>
             <div className={styles.eventKind}>
-              {getEventKindLabel(request.eventPreview.kind)}
+              {getKindLabel(request.eventPreview.kind)}
             </div>
             {request.eventPreview.content && (
               <div className={styles.eventContent}>
@@ -126,6 +146,18 @@ export function RequestCard({
           )}
           {request.method === 'connect' ? (
             <div className={styles.connectActions}>
+              {requestedPermissions.length > 0 && (
+                <div className={styles.requestedPerms}>
+                  <span className={styles.permsLabel}>App requests:</span>
+                  <div className={styles.permsList}>
+                    {requestedPermissions.map((perm, i) => (
+                      <span key={i} className={styles.permBadge}>
+                        {formatPermission(perm)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className={styles.trustOptions}>
                 <span className={styles.trustLabel}>Trust level:</span>
                 {trustLevels.map((level) => {
@@ -150,6 +182,24 @@ export function RequestCard({
                   );
                 })}
               </div>
+              <div className={styles.trustBreakdown}>
+                {trustBehavior.autoApprove.length > 0 && (
+                  <div className={styles.breakdownSection}>
+                    <span className={styles.breakdownLabel}>Auto-approve:</span>
+                    <span className={styles.breakdownItems}>
+                      {trustBehavior.autoApprove.join(', ')}
+                    </span>
+                  </div>
+                )}
+                {trustBehavior.requiresApproval.length > 0 && (
+                  <div className={styles.breakdownSection}>
+                    <span className={styles.breakdownLabel}>Will ask:</span>
+                    <span className={styles.breakdownItems}>
+                      {trustBehavior.requiresApproval.join(', ')}
+                    </span>
+                  </div>
+                )}
+              </div>
               <button
                 className={styles.connectButton}
                 onClick={() => onApprove(selectedTrustLevel)}
@@ -168,11 +218,15 @@ export function RequestCard({
                   disabled={isApproving}
                   className={styles.alwaysAllowCheckbox}
                 />
-                <span>Always allow this action</span>
+                <span>
+                  {request.method === 'sign_event' && eventKind !== undefined
+                    ? `Always allow ${getKindLabel(eventKind)}`
+                    : 'Always allow this action'}
+                </span>
               </label>
               <button
                 className={styles.approveButton}
-                onClick={() => onApprove(undefined, alwaysAllow)}
+                onClick={() => onApprove(undefined, alwaysAllow, alwaysAllow ? eventKind : undefined)}
                 disabled={!canApprove}
               >
                 {isApproving ? 'Approving...' : 'Approve'}

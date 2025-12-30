@@ -1,7 +1,9 @@
 import React, { useEffect, useCallback, useState } from 'react';
 import { FocusTrap } from 'focus-trap-react';
 import type { DisplayRequest } from '@signet/types';
-import { getEventKindLabel, getMethodInfo, getPermissionRisk } from '../../lib/event-labels.js';
+import { getKindLabel, getKindDescription, isKindSensitive } from '@signet/types';
+import { getMethodInfo, getPermissionRisk } from '../../lib/event-labels.js';
+import { copyToClipboard } from '../../lib/clipboard.js';
 import { CopyIcon, CloseIcon } from '../shared/Icons.js';
 import styles from './RequestDetailsModal.module.css';
 
@@ -73,13 +75,11 @@ export function RequestDetailsModal({
   const { Icon, category } = getMethodInfo(request.method);
   const risk = getPermissionRisk(request.method);
 
-  const copyToClipboard = async () => {
-    try {
-      await navigator.clipboard.writeText(rawJson || request.params || '');
+  const handleCopy = async () => {
+    const success = await copyToClipboard(rawJson || request.params || '');
+    if (success) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Clipboard not available
     }
   };
 
@@ -166,8 +166,8 @@ export function RequestDetailsModal({
                 </div>
                 <div className={styles.infoItem}>
                   <span className={styles.infoLabel}>From</span>
-                  <span className={styles.infoValue} title={request.remotePubkey}>
-                    {request.npub.slice(0, 12)}...{request.npub.slice(-8)}
+                  <span className={styles.infoValue} title={request.npub}>
+                    {request.appName || `${request.npub.slice(0, 12)}...${request.npub.slice(-8)}`}
                   </span>
                 </div>
                 <div className={styles.infoItem}>
@@ -194,8 +194,15 @@ export function RequestDetailsModal({
                 <div className={styles.eventDetails}>
                   <div className={styles.eventKind}>
                     <span className={styles.kindLabel}>Kind {eventKind}</span>
-                    <span className={styles.kindName}>{getEventKindLabel(eventKind)}</span>
+                    <span className={styles.kindName}>{getKindLabel(eventKind)}</span>
+                    {isKindSensitive(eventKind) && (
+                      <span className={styles.sensitiveWarning}>Sensitive</span>
+                    )}
                   </div>
+
+                  {getKindDescription(eventKind) && (
+                    <p className={styles.kindDescription}>{getKindDescription(eventKind)}</p>
+                  )}
 
                   {eventContent && (
                     <div className={styles.eventField}>
@@ -229,7 +236,7 @@ export function RequestDetailsModal({
                   <h3 className={styles.sectionTitle}>Raw JSON</h3>
                   <button
                     className={styles.copyButton}
-                    onClick={copyToClipboard}
+                    onClick={handleCopy}
                     aria-label="Copy JSON to clipboard"
                   >
                     <CopyIcon size={14} />

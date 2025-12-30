@@ -1,5 +1,6 @@
-import { NDKPrivateKeySigner } from '@nostr-dev-kit/ndk';
-import { nip19 } from 'nostr-tools';
+import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
+import { npubEncode, nsecEncode, decode as nip19Decode } from 'nostr-tools/nip19';
+import { hexToBytes } from '../lib/hex.js';
 import type { KeyInfo, KeySummary } from '@signet/types';
 import type { StoredKey } from '../../config/types.js';
 import { encryptSecret, decryptSecret } from '../../config/keyring.js';
@@ -60,26 +61,26 @@ export class KeyService {
             throw new Error('A key with this name already exists');
         }
 
-        let signer: NDKPrivateKeySigner;
+        let secretKeyBytes: Uint8Array;
 
         if (nsec) {
-            const decoded = nip19.decode(nsec);
+            const decoded = nip19Decode(nsec);
             if (decoded.type !== 'nsec') {
                 throw new Error('Provided secret is not a valid nsec');
             }
-            // Convert Uint8Array to hex string
-            const hexKey = Buffer.from(decoded.data as Uint8Array).toString('hex');
-            signer = new NDKPrivateKeySigner(hexKey);
+            secretKeyBytes = decoded.data as Uint8Array;
         } else {
-            signer = NDKPrivateKeySigner.generate();
+            secretKeyBytes = generateSecretKey();
             try {
-                await createSkeletonProfile(signer);
+                await createSkeletonProfile(secretKeyBytes, this.config.nostrRelays);
             } catch (error) {
-                console.log(`⚠️ Failed to create skeleton profile: ${(error as Error).message}`);
+                console.log(`Failed to create skeleton profile: ${(error as Error).message}`);
             }
         }
 
-        const secretNsec = nip19.nsecEncode(Buffer.from(signer.privateKey!, 'hex'));
+        const secretNsec = nsecEncode(secretKeyBytes);
+        const pubkey = getPublicKey(secretKeyBytes);
+        const npub = npubEncode(pubkey);
 
         // Save to config
         const config = await loadConfig(this.config.configFile);
@@ -101,12 +102,11 @@ export class KeyService {
             await this.config.onKeyActivated(keyName, secretNsec);
         }
 
-        const user = await signer.user();
-        const bunkerUri = this.buildBunkerUri(user.pubkey);
+        const bunkerUri = this.buildBunkerUri(pubkey);
 
         const keyInfo: KeyInfo = {
             name: keyName,
-            npub: user.npub,
+            npub,
             bunkerUri,
             status: 'online',
             isEncrypted: !!(passphrase && passphrase.trim()),
@@ -171,24 +171,22 @@ export class KeyService {
 
             if (isOnline) {
                 try {
-                    const signer = new NDKPrivateKeySigner(this.activeKeys[name]);
-                    const user = await signer.user();
-                    npub = user.npub;
-                    bunkerUri = this.buildBunkerUri(user.pubkey);
+                    const { pubkey: pk, npub: np } = this.deriveKeysFromSecret(this.activeKeys[name]);
+                    npub = np;
+                    bunkerUri = this.buildBunkerUri(pk);
                 } catch (error) {
-                    console.log(`⚠️ Unable to get info for key ${name}: ${(error as Error).message}`);
+                    console.log(`Unable to get info for key ${name}: ${(error as Error).message}`);
                 }
             } else if (entry?.key) {
                 try {
-                    const nsec = entry.key.startsWith('nsec1')
+                    const secret = entry.key.startsWith('nsec1')
                         ? entry.key
-                        : nip19.nsecEncode(Buffer.from(entry.key, 'hex'));
-                    const signer = new NDKPrivateKeySigner(nsec);
-                    const user = await signer.user();
-                    npub = user.npub;
-                    bunkerUri = this.buildBunkerUri(user.pubkey);
+                        : nsecEncode(hexToBytes(entry.key));
+                    const { pubkey: pk, npub: np } = this.deriveKeysFromSecret(secret);
+                    npub = np;
+                    bunkerUri = this.buildBunkerUri(pk);
                 } catch (error) {
-                    console.log(`⚠️ Unable to get info for key ${name}: ${(error as Error).message}`);
+                    console.log(`Unable to get info for key ${name}: ${(error as Error).message}`);
                 }
             }
 
@@ -229,18 +227,17 @@ export class KeyService {
 
         for (const [name, secret] of Object.entries(this.activeKeys)) {
             try {
-                const signer = new NDKPrivateKeySigner(secret);
-                const user = await signer.user();
+                const { npub } = this.deriveKeysFromSecret(secret);
                 const stats = allStats.get(name) ?? { userCount: 0, tokenCount: 0 };
 
                 keys.push({
                     name,
-                    npub: user.npub,
+                    npub,
                     userCount: stats.userCount,
                     tokenCount: stats.tokenCount,
                 });
             } catch (error) {
-                console.log(`⚠️ Unable to describe key ${name}: ${(error as Error).message}`);
+                console.log(`Unable to describe key ${name}: ${(error as Error).message}`);
             }
 
             remaining.delete(name);
@@ -265,6 +262,28 @@ export class KeyService {
         const secret = this.config.adminSecret?.trim().toLowerCase();
         const secretParam = secret ? `&secret=${encodeURIComponent(secret)}` : '';
         return `bunker://${pubkey}?${relayParams}${secretParam}`;
+    }
+
+    /**
+     * Derive pubkey and npub from a secret key (nsec or hex).
+     */
+    private deriveKeysFromSecret(secret: string): { pubkey: string; npub: string } {
+        let secretBytes: Uint8Array;
+
+        if (secret.startsWith('nsec1')) {
+            const decoded = nip19Decode(secret);
+            if (decoded.type !== 'nsec') {
+                throw new Error('Invalid nsec');
+            }
+            secretBytes = decoded.data as Uint8Array;
+        } else {
+            // Assume hex
+            secretBytes = hexToBytes(secret);
+        }
+
+        const pubkey = getPublicKey(secretBytes);
+        const npub = npubEncode(pubkey);
+        return { pubkey, npub };
     }
 
     async setPassphrase(keyName: string, passphrase: string): Promise<void> {

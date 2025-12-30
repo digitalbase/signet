@@ -46,6 +46,7 @@ export function useDashboard(): UseDashboardResult {
 
   // Subscribe to SSE events for real-time stats updates
   const handleSSEEvent = useCallback((event: ServerEvent) => {
+    // Handle stats updates
     setStats(prev => {
       if (!prev) return prev;
 
@@ -63,6 +64,11 @@ export function useDashboard(): UseDashboardResult {
             ...prev,
             pendingRequests: Math.max(0, prev.pendingRequests - 1),
           };
+        case 'request:auto_approved':
+          return {
+            ...prev,
+            recentActivity24h: prev.recentActivity24h + 1,
+          };
         case 'app:connected':
           return {
             ...prev,
@@ -74,6 +80,11 @@ export function useDashboard(): UseDashboardResult {
           return prev;
       }
     });
+
+    // Handle activity updates for auto-approved requests
+    if (event.type === 'request:auto_approved') {
+      setActivity(prev => [event.activity, ...prev].slice(0, 20));
+    }
   }, []);
 
   useSSESubscription(handleSSEEvent);

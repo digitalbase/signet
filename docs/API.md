@@ -154,7 +154,9 @@ List authorization requests.
       "expiresAt": "2025-01-15T10:31:00.000Z",
       "ttlSeconds": 45,
       "requiresPassword": false,
-      "processedAt": null
+      "processedAt": null,
+      "autoApproved": false,
+      "appName": "Primal"
     }
   ]
 }
@@ -439,9 +441,11 @@ List all connected applications.
 ```
 
 **Trust Levels:**
-- `paranoid` - Always ask for approval
-- `reasonable` - Auto-approve safe event kinds (1, 6, 7, 16, 1111)
+- `paranoid` - Always ask for approval (including reconnects)
+- `reasonable` - Auto-approve safe event kinds (1, 6, 7, 16, 1111, 24242), NIP-44 encryption, and reconnects
 - `full` - Auto-approve all requests
+
+Note: NIP-04 encryption (`nip04_encrypt`, `nip04_decrypt`) always requires approval at `paranoid` and `reasonable` levels due to privacy sensitivity (legacy DMs).
 
 ---
 
@@ -513,7 +517,8 @@ Get dashboard statistics and recent activity.
       "method": "sign_event",
       "keyName": "main-key",
       "userPubkey": "hex...",
-      "appName": "Primal"
+      "appName": "Primal",
+      "autoApproved": false
     }
   ]
 }
@@ -545,14 +550,16 @@ eventSource.onmessage = (event) => {
 |------|-------------|---------|
 | `connected` | Initial connection established | `{}` |
 | `request:created` | New authorization request | `{ request: PendingRequest }` |
-| `request:approved` | Request was approved | `{ id: string }` |
-| `request:denied` | Request was denied | `{ id: string }` |
-| `request:expired` | Request expired | `{ id: string }` |
+| `request:approved` | Request was approved | `{ requestId: string }` |
+| `request:denied` | Request was denied | `{ requestId: string }` |
+| `request:expired` | Request expired | `{ requestId: string }` |
+| `request:auto_approved` | Request auto-approved via trust level | `{ activity: ActivityEntry }` |
 | `app:connected` | New app connected | `{ app: ConnectedApp }` |
 | `key:created` | Key was created | `{ key: KeyInfo }` |
 | `key:unlocked` | Key was unlocked | `{ keyName: string }` |
 | `key:deleted` | Key was deleted | `{ keyName: string }` |
 | `stats:updated` | Dashboard stats changed | `{ stats: DashboardStats }` |
+| `relays:updated` | Relay connection status changed | `{ relays: RelayStatusResponse }` |
 | `ping` | Keep-alive (every 30s) | n/a (comment line) |
 
 ---
@@ -730,9 +737,12 @@ Create a new policy.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `method` | string | NIP-46 method name |
+| `method` | string | NIP-46 method name (see [valid methods](#nip-46-methods)) |
 | `kind` | number/string | Event kind (for sign_event) |
 | `maxUsageCount` | number | Usage limit (null = unlimited) |
+
+**Errors:**
+- `400 Bad Request` - Invalid method name(s). Response includes the list of valid methods.
 
 **Response:**
 ```json
@@ -819,6 +829,7 @@ For reference, these are the NIP-46 methods that appear in requests:
 | `nip04_decrypt` | Decrypt message (NIP-04) |
 | `nip44_encrypt` | Encrypt message (NIP-44) |
 | `nip44_decrypt` | Decrypt message (NIP-44) |
+| `ping` | Connection health check |
 
 ---
 
@@ -834,6 +845,8 @@ import type {
   KeyInfo,
   ConnectedApp,
   DashboardResponse,
+  DashboardStats,
+  ActivityEntry,
   TrustLevel,
 } from '@signet/types';
 ```

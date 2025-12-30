@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AppRepository } from '../app-repository.js';
 import { createMockKeyUser } from '../../testing/mocks.js';
 
+// Mock the acl module
+vi.mock('../../lib/acl.js', () => ({
+  invalidateAclCache: vi.fn(),
+}));
+
 // Mock the db module - must use inline factory to avoid hoisting issues
 vi.mock('../../../db.js', () => ({
   default: {
@@ -93,12 +98,18 @@ describe('AppRepository', () => {
   });
 
   describe('revoke', () => {
-    it('should set revokedAt timestamp', async () => {
+    it('should set revokedAt timestamp and invalidate cache', async () => {
+      mockPrisma.keyUser.update.mockResolvedValue({
+        keyName: 'test-key',
+        userPubkey: 'abc123',
+      });
+
       await repository.revoke(1);
 
       expect(mockPrisma.keyUser.update).toHaveBeenCalledWith({
         where: { id: 1 },
         data: { revokedAt: expect.any(Date) },
+        select: { keyName: true, userPubkey: true },
       });
     });
   });

@@ -1,5 +1,6 @@
 import React from 'react';
 import type { ConnectionInfo } from '@signet/types';
+import { copyToClipboard } from '../../lib/clipboard.js';
 import styles from './Header.module.css';
 
 interface HeaderProps {
@@ -8,10 +9,6 @@ interface HeaderProps {
 }
 
 export function Header({ connectionInfo, sseConnected = false }: HeaderProps) {
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text).catch(console.error);
-  };
-
   return (
     <header className={styles.header}>
       <div className={styles.brand}>

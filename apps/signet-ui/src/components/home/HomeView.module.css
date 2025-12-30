@@ -447,6 +447,45 @@
   color: var(--text-primary);
 }
 
+.autoBadge {
+  font-size: 10px;
+  font-weight: var(--font-medium);
+  padding: 2px 5px;
+  margin-right: var(--space-1);
+  background: var(--accent-muted);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.filterToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.filterToggle input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.filterToggle:hover {
+  color: var(--text-secondary);
+}
+
 .activityMeta {
   flex: 1;
   font-size: var(--text-xs);

@@ -34,6 +34,7 @@ function AppContent() {
   const [detailsModalRequest, setDetailsModalRequest] = useState<DisplayRequest | null>(null);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [selectedKeyName, setSelectedKeyName] = useState<string | null>(null);
+  const [showAutoApproved, setShowAutoApproved] = useState(true);
 
   const { showToast } = useToast();
   const { settings } = useSettings();
@@ -63,6 +64,7 @@ function AppContent() {
       case 'request:approved':
       case 'request:denied':
       case 'request:expired':
+      case 'request:auto_approved':
         requests.refresh();
         dashboard.refresh();
         break;
@@ -121,21 +123,6 @@ function AppContent() {
     }
   }, []);
 
-  // Send notification for new requests
-  useEffect(() => {
-    if (!settings.notificationsEnabled || notificationPermission !== 'granted') {
-      return;
-    }
-
-    const pendingCount = requests.requests.filter(r => r.state === 'pending').length;
-    if (pendingCount > 0 && document.hidden) {
-      new Notification('Signet', {
-        body: `${pendingCount} pending request${pendingCount > 1 ? 's' : ''} awaiting approval`,
-        icon: '/favicon.ico',
-      });
-    }
-  }, [requests.requests, settings.notificationsEnabled, notificationPermission]);
-
   // Global keyboard shortcut for Command Palette (Cmd+K / Ctrl+K)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -149,17 +136,42 @@ function AppContent() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // Use dashboard stats for accurate pending count (not affected by filter)
+  const pendingCount = dashboard.stats?.pendingRequests ?? 0;
+
   // Update browser tab title with pending count
-  const pendingCount = requests.requests.filter(r => r.state === 'pending').length;
   useEffect(() => {
     document.title = pendingCount > 0 ? `(${pendingCount}) Signet` : 'Signet';
   }, [pendingCount]);
+
+  // Send notification for new requests (use dashboard stats for accuracy regardless of filter)
+  useEffect(() => {
+    if (!settings.notificationsEnabled || notificationPermission !== 'granted') {
+      return;
+    }
+
+    if (pendingCount > 0 && document.hidden) {
+      new Notification('Signet', {
+        body: `${pendingCount} pending request${pendingCount > 1 ? 's' : ''} awaiting approval`,
+        icon: '/favicon.ico',
+      });
+    }
+  }, [pendingCount, settings.notificationsEnabled, notificationPermission]);
 
   // Handle key selection from sidebar
   const handleKeySelect = useCallback((keyName: string) => {
     setSelectedKeyName(keyName);
     setActiveNav('keys');
   }, []);
+
+  // Handle navigation changes - reset filter when going to Home
+  const handleNavChange = useCallback((nav: NavItem) => {
+    setActiveNav(nav);
+    // When navigating to Home, ensure we're viewing pending requests
+    if (nav === 'home' && requests.filter !== 'pending') {
+      requests.setFilter('pending');
+    }
+  }, [requests.filter, requests.setFilter]);
 
   if (connectionLoading) {
     return (
@@ -181,11 +193,13 @@ function AppContent() {
             loading={requests.loading || dashboard.loading}
             relayStatus={relays.relays}
             passwords={requests.passwords}
+            showAutoApproved={showAutoApproved}
             onPasswordChange={requests.setPassword}
             onApprove={requests.approve}
             onViewDetails={setDetailsModalRequest}
             onNavigateToActivity={() => setActiveNav('activity')}
             onNavigateToKeys={() => setActiveNav('keys')}
+            onToggleShowAutoApproved={() => setShowAutoApproved(prev => !prev)}
           />
         );
 
@@ -312,7 +326,7 @@ function AppContent() {
   return (
     <AppLayout
       activeNav={activeNav}
-      onNavChange={setActiveNav}
+      onNavChange={handleNavChange}
       pendingCount={pendingCount}
       keys={keys.keys}
       activeKeyName={selectedKeyName ?? undefined}

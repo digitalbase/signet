@@ -10,6 +10,11 @@ vi.mock('../../lib/api-client.js', () => ({
   apiGet: vi.fn(),
 }));
 
+// Mock the ServerEventsContext to avoid SSE setup in tests
+vi.mock('../../contexts/ServerEventsContext.js', () => ({
+  useSSESubscription: vi.fn(),
+}));
+
 function wrapper({ children }: { children: React.ReactNode }) {
   return <SettingsProvider>{children}</SettingsProvider>;
 }

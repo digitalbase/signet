@@ -80,7 +80,7 @@ interface RequestsPanelProps {
   sortBy: SortBy;
   onFilterChange: (filter: RequestFilter) => void;
   onPasswordChange: (id: string, password: string) => void;
-  onApprove: (id: string, trustLevel?: TrustLevel) => void;
+  onApprove: (id: string, trustLevel?: TrustLevel, alwaysAllow?: boolean, allowKind?: number) => void;
   onLoadMore: () => void;
   onToggleSelectionMode: () => void;
   onToggleSelection: (id: string) => void;
@@ -133,10 +133,10 @@ export function RequestsPanel({
   }, [requests]);
 
   const uniqueApps = useMemo(() => {
-    const apps = new Map<string, string>(); // npub -> display name (npub truncated)
+    const apps = new Map<string, string>(); // npub -> display name (appName or truncated npub)
     requests.forEach(r => {
       if (!apps.has(r.npub)) {
-        apps.set(r.npub, r.npub.slice(0, 12) + '...');
+        apps.set(r.npub, r.appName || r.npub.slice(0, 12) + '...');
       }
     });
     return Array.from(apps.entries()).sort((a, b) => a[1].localeCompare(b[1]));
@@ -306,7 +306,7 @@ export function RequestsPanel({
                     selectionMode={selectionMode}
                     selected={selectedIds.has(request.id)}
                     onPasswordChange={(pw) => onPasswordChange(request.id, pw)}
-                    onApprove={(trustLevel) => onApprove(request.id, trustLevel)}
+                    onApprove={(trustLevel, alwaysAllow, allowKind) => onApprove(request.id, trustLevel, alwaysAllow, allowKind)}
                     onSelect={() => onToggleSelection(request.id)}
                     onViewDetails={() => setSelectedRequest(request)}
                   />

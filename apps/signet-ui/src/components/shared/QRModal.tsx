@@ -1,6 +1,7 @@
 import React from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { X, Copy, Check } from 'lucide-react';
+import { copyToClipboard } from '../../lib/clipboard.js';
 import styles from './QRModal.module.css';
 
 interface QRModalProps {
@@ -14,12 +15,10 @@ export function QRModal({ open, onClose, value, title = 'Scan QR Code' }: QRModa
   const [copied, setCopied] = React.useState(false);
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
+    const success = await copyToClipboard(value);
+    if (success) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Fallback for older browsers
     }
   };
 

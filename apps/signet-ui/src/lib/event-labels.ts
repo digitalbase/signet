@@ -11,33 +11,10 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import type { TrustLevel } from '@signet/types';
+import { getKindLabel } from '@signet/types';
 
-export const getEventKindLabel = (kind: number): string => {
-  const kinds: Record<number, string> = {
-    0: 'Profile metadata',
-    1: 'Note',
-    2: 'Relay recommendation',
-    3: 'Contacts',
-    4: 'Encrypted DM',
-    5: 'Event deletion',
-    6: 'Repost',
-    7: 'Reaction',
-    8: 'Badge award',
-    40: 'Channel creation',
-    41: 'Channel metadata',
-    42: 'Channel message',
-    43: 'Channel hide',
-    44: 'Channel mute',
-    1063: 'File metadata',
-    1984: 'Report',
-    9734: 'Zap request',
-    9735: 'Zap',
-    10002: 'Relay list',
-    30023: 'Long-form content',
-    30078: 'App-specific data',
-  };
-  return kinds[kind] || `Event (kind ${kind})`;
-};
+// Re-export from shared package for backwards compatibility
+export const getEventKindLabel = getKindLabel;
 
 export type PermissionRisk = 'high' | 'medium' | 'low';
 
@@ -111,16 +88,3 @@ export function getTrustLevelInfo(level: TrustLevel): TrustLevelInfo {
       };
   }
 }
-
-// Legacy emoji support for backward compatibility during migration
-export const TRUST_LEVEL_LABELS: Record<TrustLevel, string> = {
-  paranoid: 'Always Ask',
-  reasonable: 'Auto-approve Safe',
-  full: 'Auto-approve All',
-};
-
-export const TRUST_LEVEL_DESCRIPTIONS: Record<TrustLevel, string> = {
-  paranoid: 'Every action requires your approval',
-  reasonable: 'Auto-approve common actions, ask for sensitive ones',
-  full: 'Automatically approve all requests from this app',
-};

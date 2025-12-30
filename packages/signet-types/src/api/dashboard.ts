@@ -20,6 +20,7 @@ export interface ActivityEntry {
     keyName?: string;
     userPubkey?: string;
     appName?: string;
+    autoApproved: boolean;
 }
 
 /**

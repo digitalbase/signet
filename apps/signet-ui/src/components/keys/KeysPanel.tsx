@@ -7,6 +7,7 @@ import { PageHeader } from '../shared/PageHeader.js';
 import { Key, ChevronDown, ChevronRight, Copy, QrCode, Lock, Unlock, Trash2, Users, Pencil, Shield } from 'lucide-react';
 import { formatRelativeTime, toNpub } from '../../lib/formatters.js';
 import { getTrustLevelInfo } from '../../lib/event-labels.js';
+import { copyToClipboard as copyText } from '../../lib/clipboard.js';
 import styles from './KeysPanel.module.css';
 
 interface KeysPanelProps {
@@ -170,12 +171,10 @@ export function KeysPanel({
   };
 
   const copyToClipboard = async (text: string, field: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
+    const success = await copyText(text);
+    if (success) {
       setCopiedField(field);
       setTimeout(() => setCopiedField(null), 2000);
-    } catch {
-      // Fallback silently
     }
   };
 

@@ -15,11 +15,13 @@ interface HomeViewProps {
   loading: boolean;
   relayStatus: RelayStatusResponse | null;
   passwords: Record<string, string>;
+  showAutoApproved: boolean;
   onPasswordChange: (requestId: string, password: string) => void;
   onApprove: (requestId: string, trustLevel?: TrustLevel) => Promise<void>;
   onViewDetails: (request: DisplayRequest) => void;
   onNavigateToActivity: () => void;
   onNavigateToKeys: () => void;
+  onToggleShowAutoApproved: () => void;
 }
 
 export function HomeView({
@@ -29,11 +31,13 @@ export function HomeView({
   loading,
   relayStatus,
   passwords,
+  showAutoApproved,
   onPasswordChange,
   onApprove,
   onViewDetails,
   onNavigateToActivity,
   onNavigateToKeys,
+  onToggleShowAutoApproved,
 }: HomeViewProps) {
   const [expandedRequestId, setExpandedRequestId] = useState<string | null>(null);
   const [selectedTrustLevels, setSelectedTrustLevels] = useState<Record<string, TrustLevel>>({});
@@ -47,7 +51,11 @@ export function HomeView({
   const setTrustLevel = (requestId: string, level: TrustLevel) => {
     setSelectedTrustLevels(prev => ({ ...prev, [requestId]: level }));
   };
-  const recentActivity = activity.slice(0, 5);
+
+  const filteredActivity = showAutoApproved
+    ? activity
+    : activity.filter(entry => !entry.autoApproved);
+  const recentActivity = filteredActivity.slice(0, 5);
 
   const formatTimeAgo = (timestamp: string): string => {
     const diff = Date.now() - new Date(timestamp).getTime();
@@ -272,11 +280,21 @@ export function HomeView({
 
           {/* Recent Activity */}
           <section className={styles.section}>
-            <h2 className={styles.sectionTitle}>Recent</h2>
+            <div className={styles.sectionHeader}>
+              <h2 className={styles.sectionTitle}>Recent</h2>
+              <label className={styles.filterToggle}>
+                <input
+                  type="checkbox"
+                  checked={showAutoApproved}
+                  onChange={onToggleShowAutoApproved}
+                />
+                <span>Show auto</span>
+              </label>
+            </div>
             {recentActivity.length === 0 ? (
               <div className={styles.emptyState}>
                 <span className={styles.emptyIcon}><Activity size={32} /></span>
-                <p>No recent activity</p>
+                <p>{activity.length === 0 ? 'No recent activity' : 'No manual approvals'}</p>
               </div>
             ) : (
               <div className={styles.listCard}>
@@ -287,7 +305,10 @@ export function HomeView({
                     <span className={styles.activityMeta}>
                       {entry.appName || entry.keyName || 'Unknown'}
                     </span>
-                    <span className={styles.activityTime}>{formatTimeAgo(entry.timestamp)}</span>
+                    <span className={styles.activityTime}>
+                      {entry.autoApproved && <span className={styles.autoBadge}>Auto</span>}
+                      {formatTimeAgo(entry.timestamp)}
+                    </span>
                   </div>
                 ))}
                 <button className={styles.viewAllButton} onClick={onNavigateToActivity}>

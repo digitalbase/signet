@@ -1,11 +1,9 @@
 import 'websocket-polyfill';
-import NDK, {
-    NDKEvent,
-    NDKNip46Signer,
-    NDKPrivateKeySigner,
-    NDKUser,
-    type NostrEvent,
-} from '@nostr-dev-kit/ndk';
+import { SimplePool } from 'nostr-tools/pool';
+import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent, type Event, type UnsignedEvent } from 'nostr-tools/pure';
+import { npubEncode, nsecEncode, decode as nip19Decode } from 'nostr-tools/nip19';
+import { encrypt as nip44Encrypt, decrypt as nip44Decrypt, getConversationKey } from 'nostr-tools/nip44';
+import { type Filter } from 'nostr-tools/filter';
 import fs from 'fs';
 import path from 'path';
 
@@ -28,25 +26,39 @@ function extractRelays(): string[] {
 const extraRelays = extractRelays();
 
 if (!command || !remoteTarget) {
-    console.log('Usage: node client sign <remote-npub-or-nip05-or-bunker-token> <content> [--dont-publish] [--debug] [--relays <relay1,relay2>]');
+    console.log('Usage: node client sign <remote-npub-or-bunker-token> <content> [--dont-publish] [--debug] [--relays <relay1,relay2>]');
     console.log('');
     console.log('\tcontent: JSON event or text for kind 1');
     process.exit(1);
 }
 
-const bunkerToken = remoteTarget.startsWith('bunker://') ? remoteTarget : undefined;
-let bunkerRelays: string[] = [];
-if (bunkerToken) {
-    try {
-        const parsed = new URL(bunkerToken.trim());
-        bunkerRelays = parsed.searchParams.getAll('relay').map((relay) => decodeURIComponent(relay));
-        if (bunkerRelays.length === 0) {
-            throw new Error('No relays found in bunker token');
-        }
-    } catch (error) {
-        console.log(`Invalid bunker token: ${(error as Error).message}`);
-        process.exit(1);
+interface BunkerInfo {
+    pubkey: string;
+    relays: string[];
+    secret?: string;
+}
+
+function parseBunkerToken(token: string): BunkerInfo {
+    const parsed = new URL(token.trim());
+    const pubkey = parsed.pathname.replace('//', '');
+    const relays = parsed.searchParams.getAll('relay').map((relay) => decodeURIComponent(relay));
+    const secret = parsed.searchParams.get('secret') ?? undefined;
+
+    if (relays.length === 0) {
+        throw new Error('No relays found in bunker token');
     }
+
+    // Handle both hex pubkey and npub
+    let resolvedPubkey = pubkey;
+    if (pubkey.startsWith('npub1')) {
+        const decoded = nip19Decode(pubkey);
+        if (decoded.type !== 'npub') {
+            throw new Error('Invalid npub in bunker token');
+        }
+        resolvedPubkey = decoded.data as string;
+    }
+
+    return { pubkey: resolvedPubkey, relays, secret };
 }
 
 function keyStorageDir(): string {
@@ -57,18 +69,27 @@ function keyStorageDir(): string {
     return path.join(home, '.signet-client-private.key');
 }
 
-function loadPrivateKey(): string | undefined {
+function loadPrivateKey(): Uint8Array | undefined {
     try {
-        return fs.readFileSync(path.join(keyStorageDir(), 'private.key'), 'utf8').trim();
+        const data = fs.readFileSync(path.join(keyStorageDir(), 'private.key'), 'utf8').trim();
+        if (data.startsWith('nsec1')) {
+            const decoded = nip19Decode(data);
+            if (decoded.type !== 'nsec') {
+                return undefined;
+            }
+            return decoded.data as Uint8Array;
+        }
+        // Assume hex
+        return Buffer.from(data, 'hex');
     } catch {
         return undefined;
     }
 }
 
-function persistPrivateKey(key: string): void {
+function persistPrivateKey(key: Uint8Array): void {
     const dir = keyStorageDir();
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'private.key'), key);
+    fs.writeFileSync(path.join(dir, 'private.key'), nsecEncode(key));
 }
 
 function buildRelays(defaultsOverride: string[] = []): string[] {
@@ -77,122 +98,317 @@ function buildRelays(defaultsOverride: string[] = []): string[] {
         : [
               'wss://relay.damus.io',
               'wss://relay.primal.net',
-              'wss://nost.lol',
+              'wss://nos.lol',
           ];
     return [...defaults, ...extraRelays];
 }
 
-async function resolveRemoteUser(ndk: NDK): Promise<NDKUser> {
-    if (remoteTarget.includes('@') && !remoteTarget.startsWith('npub')) {
-        const user = await NDKUser.fromNip05(remoteTarget, ndk);
-        if (!user) {
-            throw new Error(`Unable to resolve ${remoteTarget}`);
+interface Nip46Request {
+    id: string;
+    method: string;
+    params: string[];
+}
+
+interface Nip46Response {
+    id: string;
+    result?: string;
+    error?: string;
+}
+
+function generateRequestId(): string {
+    return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+class Nip46Client {
+    private readonly pool: SimplePool;
+    private readonly relays: string[];
+    private readonly localSecretKey: Uint8Array;
+    private readonly localPubkey: string;
+    private readonly remotePubkey: string;
+    private readonly secret?: string;
+    private unsubscribe?: () => void;
+    private pendingRequests: Map<string, {
+        resolve: (result: string) => void;
+        reject: (error: Error) => void;
+    }> = new Map();
+
+    constructor(
+        pool: SimplePool,
+        relays: string[],
+        localSecretKey: Uint8Array,
+        remotePubkey: string,
+        secret?: string
+    ) {
+        this.pool = pool;
+        this.relays = relays;
+        this.localSecretKey = localSecretKey;
+        this.localPubkey = getPublicKey(localSecretKey);
+        this.remotePubkey = remotePubkey;
+        this.secret = secret;
+    }
+
+    async connect(): Promise<string> {
+        // Subscribe to responses
+        this.subscribeToResponses();
+
+        // Send connect request
+        const params = [this.localPubkey];
+        if (this.secret) {
+            params.push(this.secret);
         }
-        remoteTarget = user.npub;
-        return user;
+
+        const result = await this.sendRequest('connect', params);
+
+        if (result === 'auth_url') {
+            throw new Error('Remote signer requires authorization - not implemented in this client');
+        }
+
+        return result;
     }
 
-    return new NDKUser({ npub: remoteTarget });
-}
-
-async function createNdk(relaysOverride: string[] = []): Promise<NDK> {
-    const ndk = new NDK({
-        explicitRelayUrls: buildRelays(relaysOverride),
-        enableOutboxModel: false,
-    });
-
-    if (debug) {
-        ndk.pool.on('relay:disconnect', (relay) => console.log(`Disconnected from ${relay.url}`));
+    async getPublicKey(): Promise<string> {
+        return this.sendRequest('get_public_key', []);
     }
 
-    await ndk.connect(5_000);
-    return ndk;
-}
-
-async function ensureLocalSigner(): Promise<NDKPrivateKeySigner> {
-    const existing = loadPrivateKey();
-    if (existing) {
-        return new NDKPrivateKeySigner(existing);
+    async signEvent(event: UnsignedEvent): Promise<Event> {
+        const result = await this.sendRequest('sign_event', [JSON.stringify(event)]);
+        return JSON.parse(result) as Event;
     }
 
-    const generated = NDKPrivateKeySigner.generate();
-    persistPrivateKey(generated.privateKey!);
-    return generated;
+    private subscribeToResponses(): void {
+        if (this.unsubscribe) {
+            return;
+        }
+
+        const filter: Filter = {
+            kinds: [24133],
+            '#p': [this.localPubkey],
+        };
+
+        const sub = this.pool.subscribeMany(
+            this.relays,
+            filter,
+            {
+                onevent: (event) => {
+                    this.handleResponse(event).catch((err) => {
+                        if (debug) {
+                            console.error('Error handling response:', err);
+                        }
+                    });
+                },
+            }
+        );
+
+        this.unsubscribe = () => sub.close();
+    }
+
+    private async handleResponse(event: Event): Promise<void> {
+        if (!verifyEvent(event)) {
+            if (debug) {
+                console.log('Invalid signature on response');
+            }
+            return;
+        }
+
+        // Only accept responses from the remote signer
+        if (event.pubkey !== this.remotePubkey) {
+            return;
+        }
+
+        // Decrypt response
+        let response: Nip46Response;
+        try {
+            const conversationKey = getConversationKey(this.localSecretKey, event.pubkey);
+            const decrypted = nip44Decrypt(event.content, conversationKey);
+            response = JSON.parse(decrypted) as Nip46Response;
+        } catch (err) {
+            if (debug) {
+                console.log('Failed to decrypt response:', err);
+            }
+            return;
+        }
+
+        if (debug) {
+            console.log('Received response:', response);
+        }
+
+        const pending = this.pendingRequests.get(response.id);
+        if (!pending) {
+            if (debug) {
+                console.log('No pending request for response:', response.id);
+            }
+            return;
+        }
+
+        this.pendingRequests.delete(response.id);
+
+        if (response.error && response.result !== 'auth_url') {
+            pending.reject(new Error(response.error));
+        } else {
+            pending.resolve(response.result ?? '');
+        }
+    }
+
+    private async sendRequest(method: string, params: string[]): Promise<string> {
+        const id = generateRequestId();
+        const request: Nip46Request = { id, method, params };
+
+        // Encrypt request
+        const conversationKey = getConversationKey(this.localSecretKey, this.remotePubkey);
+        const encrypted = nip44Encrypt(JSON.stringify(request), conversationKey);
+
+        // Create and sign event
+        const event = finalizeEvent({
+            kind: 24133,
+            content: encrypted,
+            tags: [['p', this.remotePubkey]],
+            created_at: Math.floor(Date.now() / 1000),
+        }, this.localSecretKey);
+
+        if (debug) {
+            console.log('Sending request:', { id, method });
+        }
+
+        // Create promise for response
+        const responsePromise = new Promise<string>((resolve, reject) => {
+            this.pendingRequests.set(id, { resolve, reject });
+
+            // Timeout after 60 seconds
+            setTimeout(() => {
+                if (this.pendingRequests.has(id)) {
+                    this.pendingRequests.delete(id);
+                    reject(new Error('Request timed out'));
+                }
+            }, 60_000);
+        });
+
+        // Publish request
+        await Promise.allSettled(this.pool.publish(this.relays, event));
+
+        return responsePromise;
+    }
+
+    close(): void {
+        this.unsubscribe?.();
+        this.pool.close(this.relays);
+    }
 }
 
-async function signCommand(ndk: NDK, signer: NDKNip46Signer): Promise<void> {
+async function signCommand(client: Nip46Client, pool: SimplePool, relays: string[]): Promise<void> {
     if (debug) {
         console.log('Waiting for authorization...');
     }
 
-    const remoteUser = await signer.blockUntilReady();
+    // Connect to remote signer
+    await client.connect();
+
+    const remotePubkey = await client.getPublicKey();
     if (debug) {
-        console.log(`Remote user: ${remoteUser.npub}`);
+        console.log(`Remote pubkey: ${npubEncode(remotePubkey)}`);
     }
 
-    let event: NDKEvent;
+    // Build event to sign
+    let eventToSign: UnsignedEvent;
     try {
         const parsed = JSON.parse(payload ?? '{}');
-        event = new NDKEvent(ndk, parsed as NostrEvent);
-        if (!event.kind) {
+        if (!parsed.kind) {
             throw new Error('Event kind missing');
         }
-        event.tags ??= [];
-        event.content ??= '';
-    } catch (error) {
-        // Create a minimal event - NDK will fill in created_at and pubkey when signing
-        event = new NDKEvent(ndk);
-        event.kind = 1;
-        event.content = payload ?? '';
-        event.tags = [['client', 'signet-client']];
+        eventToSign = {
+            kind: parsed.kind,
+            content: parsed.content ?? '',
+            tags: parsed.tags ?? [],
+            created_at: parsed.created_at ?? Math.floor(Date.now() / 1000),
+            pubkey: remotePubkey,
+        };
+    } catch {
+        // Create a simple kind 1 note
+        eventToSign = {
+            kind: 1,
+            content: payload ?? '',
+            tags: [['client', 'signet-client']],
+            created_at: Math.floor(Date.now() / 1000),
+            pubkey: remotePubkey,
+        };
     }
 
-    await event.sign();
+    // Sign the event
+    const signedEvent = await client.signEvent(eventToSign);
+
     if (debug) {
-        console.log(JSON.stringify(event.rawEvent(), null, 2));
+        console.log(JSON.stringify(signedEvent, null, 2));
     } else {
-        console.log(event.sig);
+        console.log(signedEvent.sig);
     }
 
     if (!dontPublish) {
-        await event.publish();
+        const results = await Promise.allSettled(pool.publish(relays, signedEvent));
+        const successes = results.filter(r => r.status === 'fulfilled').length;
+        if (debug) {
+            console.log(`Published to ${successes}/${relays.length} relays`);
+        }
     }
 }
 
 (async () => {
     try {
-        const ndk = await createNdk(bunkerRelays);
-        const localSigner = await ensureLocalSigner();
+        // Parse bunker token or npub
+        let bunkerInfo: BunkerInfo;
+        if (remoteTarget.startsWith('bunker://')) {
+            bunkerInfo = parseBunkerToken(remoteTarget);
+        } else {
+            // Assume npub
+            let pubkey: string;
+            if (remoteTarget.startsWith('npub1')) {
+                const decoded = nip19Decode(remoteTarget);
+                if (decoded.type !== 'npub') {
+                    throw new Error('Invalid npub');
+                }
+                pubkey = decoded.data as string;
+            } else {
+                pubkey = remoteTarget;
+            }
+            bunkerInfo = {
+                pubkey,
+                relays: buildRelays(),
+            };
+        }
+
+        const relays = buildRelays(bunkerInfo.relays);
+        const pool = new SimplePool();
+
+        // Load or generate local signer
+        let localSecretKey: Uint8Array | undefined = loadPrivateKey();
+        if (!localSecretKey) {
+            localSecretKey = generateSecretKey();
+            persistPrivateKey(localSecretKey);
+        }
+
+        // At this point localSecretKey is guaranteed to be defined
+        const secretKey = localSecretKey;
 
         if (debug) {
-            const localUser = await localSigner.user();
-            console.log(`Local signer: ${localUser.npub}`);
+            console.log(`Local signer: ${npubEncode(getPublicKey(secretKey))}`);
+            console.log(`Remote signer: ${npubEncode(bunkerInfo.pubkey)}`);
+            console.log(`Relays: ${relays.join(', ')}`);
         }
 
-        let nip46Signer: NDKNip46Signer;
-
-        if (bunkerToken) {
-            nip46Signer = NDKNip46Signer.bunker(ndk, bunkerToken, localSigner);
-        } else {
-            const remoteUser = await resolveRemoteUser(ndk);
-
-            if (debug) {
-                console.log(`Remote signer: ${remoteUser.npub}`);
-            }
-
-            nip46Signer = new NDKNip46Signer(ndk, remoteUser.pubkey, localSigner);
-        }
-
-        nip46Signer.on('authUrl', (url: string) => {
-            console.log(`Authorize this request at ${url}`);
-        });
+        const client = new Nip46Client(
+            pool,
+            relays,
+            secretKey,
+            bunkerInfo.pubkey,
+            bunkerInfo.secret
+        );
 
         if (command === 'sign') {
-            await signCommand(ndk, nip46Signer);
+            await signCommand(client, pool, relays);
         } else {
             console.log(`Unknown command "${command}"`);
             process.exit(1);
         }
+
+        client.close();
     } catch (error) {
         console.log(`Error: ${(error as Error).message}`);
         process.exit(1);

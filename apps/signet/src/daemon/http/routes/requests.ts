@@ -13,6 +13,7 @@ interface BatchApprovalBody {
     ids: string[];
     trustLevel?: TrustLevel;
     alwaysAllow?: boolean;
+    allowKind?: number;
 }
 
 interface BatchResult {
@@ -76,6 +77,7 @@ export function registerRequestRoutes(
 
         const trustLevel: TrustLevel = body.trustLevel || 'reasonable';
         const alwaysAllow = body.alwaysAllow === true;
+        const allowKind = typeof body.allowKind === 'number' ? body.allowKind : undefined;
         const eventService = getEventService();
         const results: BatchResult[] = [];
 
@@ -123,7 +125,8 @@ export function registerRequestRoutes(
                         }
                     } else if (alwaysAllow) {
                         // For non-connect requests with "always allow", grant the specific method
-                        const scope: AllowScope = { kind: 'all' };
+                        // If allowKind is specified, only grant for that kind; otherwise grant for all kinds
+                        const scope: AllowScope = allowKind !== undefined ? { kind: allowKind } : { kind: 'all' };
                         await permitAllRequests(record.remotePubkey, record.keyName, record.method, undefined, scope);
                     }
                     // If alwaysAllow is false, we only approve this single request

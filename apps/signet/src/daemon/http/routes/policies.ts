@@ -1,6 +1,16 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import prisma from '../../../db.js';
 
+const VALID_METHODS = new Set([
+    'connect',
+    'sign_event',
+    'get_public_key',
+    'encrypt', 'decrypt',
+    'nip04_encrypt', 'nip04_decrypt',
+    'nip44_encrypt', 'nip44_decrypt',
+    'ping',
+]);
+
 export function registerPoliciesRoutes(
     fastify: FastifyInstance,
     preHandler: { auth: any[]; csrf: any[]; rateLimit: any[] }
@@ -45,6 +55,18 @@ export function registerPoliciesRoutes(
 
         if (!body.name) {
             return reply.code(400).send({ error: 'name is required' });
+        }
+
+        // Validate method names
+        if (body.rules) {
+            const invalidMethods = body.rules
+                .map(r => r.method)
+                .filter(m => !VALID_METHODS.has(m));
+            if (invalidMethods.length > 0) {
+                return reply.code(400).send({
+                    error: `Invalid method(s): ${invalidMethods.join(', ')}. Valid methods: ${[...VALID_METHODS].join(', ')}`,
+                });
+            }
         }
 
         const policy = await prisma.policy.create({

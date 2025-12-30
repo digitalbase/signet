@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { Home, Smartphone, Key, Activity, Settings, ChevronDown, ChevronRight, Link2, Plus } from 'lucide-react';
 import type { KeyInfo, RelayStatusResponse } from '@signet/types';
+import { copyToClipboard } from '../../lib/clipboard.js';
 import styles from './Sidebar.module.css';
 
 export type NavItem = 'home' | 'apps' | 'activity' | 'keys' | 'settings';
@@ -34,12 +35,10 @@ export function Sidebar({
     e.stopPropagation(); // Don't trigger key selection
     if (!key.bunkerUri) return;
 
-    try {
-      await navigator.clipboard.writeText(key.bunkerUri);
+    const success = await copyToClipboard(key.bunkerUri);
+    if (success) {
       setCopiedKey(key.name);
       setTimeout(() => setCopiedKey(null), 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
     }
   }, []);
 

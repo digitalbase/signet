@@ -22,6 +22,9 @@ export interface PendingRequest {
     ttlSeconds: number;
     requiresPassword: boolean;
     processedAt?: string | null;
+    autoApproved: boolean;
+    /** App name from KeyUser.description, if available */
+    appName?: string | null;
 }
 
 /**

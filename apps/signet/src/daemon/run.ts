@@ -1,14 +1,12 @@
-import NDK, {
-    NDKPrivateKeySigner,
-    Nip46PermitCallback,
-    type Nip46PermitCallbackParams,
-} from '@nostr-dev-kit/ndk';
-import { nip19 } from 'nostr-tools';
+import { decode as nip19Decode, npubEncode } from 'nostr-tools/nip19';
+import { hexToBytes } from './lib/hex.js';
 import { ConnectionManager } from './connection-manager.js';
-import { BunkerBackend, type BunkerBackendConfig } from './backend.js';
+import { Nip46Backend, type PermitCallbackParams } from './nip46-backend.js';
+import { RelayPool } from './lib/relay-pool.js';
+import { SubscriptionManager } from './lib/subscription-manager.js';
 import { requestAuthorization } from './authorize.js';
 import type { DaemonBootstrapConfig } from './types.js';
-import { isRequestPermitted, type RpcMethod } from './lib/acl.js';
+import { checkRequestPermission, type RpcMethod } from './lib/acl.js';
 import {
     KeyService,
     RequestService,
@@ -18,47 +16,126 @@ import {
     PublishLogger,
     EventService,
     setEventService,
+    getEventService,
 } from './services/index.js';
 import { requestRepository, logRepository } from './repositories/index.js';
 import { HttpServer } from './http/server.js';
+import prisma from '../db.js';
 
 // Cleanup constants
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const REQUEST_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 const LOG_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
+// Rate limiting for auto-approval logging: 1 log per method per minute per app
+const AUTO_APPROVAL_LOG_INTERVAL_MS = 60 * 1000; // 1 minute
+const autoApprovalLogTimestamps = new Map<string, number>();
+
+function shouldLogAutoApproval(keyUserId: number, method: string): boolean {
+    const key = `${keyUserId}:${method}`;
+    const now = Date.now();
+    const lastLog = autoApprovalLogTimestamps.get(key);
+
+    if (!lastLog || now - lastLog >= AUTO_APPROVAL_LOG_INTERVAL_MS) {
+        autoApprovalLogTimestamps.set(key, now);
+        return true;
+    }
+    return false;
+}
+
 function buildAuthorizationCallback(
     keyName: string,
     connectionManager: ConnectionManager
-): Nip46PermitCallback {
-    return async ({ id, method, pubkey, params }: Nip46PermitCallbackParams): Promise<boolean> => {
-        const humanPubkey = nip19.npubEncode(pubkey);
-        console.log(`🔐 Request ${id} from ${humanPubkey} to ${method} using key ${keyName}`);
+) {
+    return async ({ id, method, pubkey, params }: PermitCallbackParams): Promise<boolean> => {
+        const humanPubkey = npubEncode(pubkey);
+        console.log(`[${keyName}] Request ${id} from ${humanPubkey} to ${method}`);
 
         const primaryParam = Array.isArray(params) ? params[0] : undefined;
-        const existingDecision = await isRequestPermitted(
+        const result = await checkRequestPermission(
             keyName,
             pubkey,
             method as RpcMethod,
             primaryParam
         );
 
-        if (existingDecision !== undefined) {
+        if (result.permitted !== undefined) {
+            const accessType = result.autoApproved ? 'auto-approved' : 'granted';
             console.log(
-                `🔎 Access ${existingDecision ? 'granted' : 'denied'} via ACL for ${humanPubkey} - returning ${existingDecision}`
+                `[${keyName}] Access ${result.permitted ? accessType : 'denied'} via ACL for ${humanPubkey}`
             );
-            return existingDecision;
+
+            // Log auto-approved requests (with rate limiting)
+            if (result.permitted && result.autoApproved && result.keyUserId) {
+                if (shouldLogAutoApproval(result.keyUserId, method)) {
+                    // Log asynchronously to avoid blocking
+                    logAutoApproval(result.keyUserId, method, primaryParam, keyName, id, pubkey).catch(err => {
+                        console.error('Failed to log auto-approval:', err);
+                    });
+                }
+            }
+
+            return result.permitted;
         }
-        console.log(`🔍 No ACL decision for ${humanPubkey}, proceeding to authorization request`);
+        console.log(`[${keyName}] No ACL decision for ${humanPubkey}, proceeding to authorization request`);
 
         try {
             await requestAuthorization(connectionManager, keyName, pubkey, id, method, primaryParam);
             return true;
         } catch (error) {
-            console.log(`❌ Authorization rejected: ${(error as Error).message}`);
+            console.log(`[${keyName}] Authorization rejected: ${(error as Error).message}`);
             return false;
         }
     };
+}
+
+async function logAutoApproval(
+    keyUserId: number,
+    method: string,
+    params: string | undefined,
+    keyName: string,
+    requestId: string,
+    remotePubkey: string
+): Promise<void> {
+    // Fetch KeyUser info for the activity entry
+    const keyUser = await prisma.keyUser.findUnique({
+        where: { id: keyUserId },
+        select: { userPubkey: true, description: true },
+    });
+
+    const paramsStr = typeof params === 'string' ? params : JSON.stringify(params);
+
+    // Create request record (so it appears in Activity page)
+    await requestRepository.createAutoApproved({
+        requestId,
+        keyName,
+        method,
+        remotePubkey,
+        params: paramsStr,
+        keyUserId,
+    });
+
+    // Create log entry
+    const log = await logRepository.create({
+        type: 'approval',
+        method,
+        params: paramsStr,
+        keyUserId,
+        autoApproved: true,
+    });
+
+    // Emit SSE event
+    const eventService = getEventService();
+    eventService.emitRequestAutoApproved({
+        id: log.id,
+        timestamp: log.timestamp.toISOString(),
+        type: log.type,
+        method: log.method ?? undefined,
+        keyName,
+        userPubkey: keyUser?.userPubkey,
+        appName: keyUser?.description ?? undefined,
+        autoApproved: true,
+    });
 }
 
 export async function runDaemon(config: DaemonBootstrapConfig): Promise<void> {
@@ -68,7 +145,8 @@ export async function runDaemon(config: DaemonBootstrapConfig): Promise<void> {
 
 class Daemon {
     private readonly config: DaemonBootstrapConfig;
-    private readonly ndk: NDK;
+    private readonly pool: RelayPool;
+    private readonly subscriptionManager: SubscriptionManager;
     private readonly connectionManager: ConnectionManager;
     private readonly keyService: KeyService;
     private readonly requestService: RequestService;
@@ -77,45 +155,28 @@ class Daemon {
     private readonly relayService: RelayService;
     private readonly publishLogger: PublishLogger;
     private readonly eventService: EventService;
+    private readonly backends: Map<string, Nip46Backend> = new Map();
     private httpServer?: HttpServer;
 
     constructor(config: DaemonBootstrapConfig) {
         this.config = config;
 
-        // Use admin key as the pool-level signer for NIP-42 relay authentication
-        const poolSigner = new NDKPrivateKeySigner(config.admin.key);
+        // Create shared relay pool
+        this.pool = new RelayPool(config.nostr.relays);
 
-        this.ndk = new NDK({
-            explicitRelayUrls: config.nostr.relays,
-            signer: poolSigner,
+        // Create subscription manager for automatic reconnection after sleep/wake
+        this.subscriptionManager = new SubscriptionManager({ pool: this.pool });
+
+        // Initialize relay health monitoring
+        this.relayService = new RelayService(this.pool);
+
+        // Wire up relay status change callback to emit SSE events
+        this.pool.setStatusChangeCallback(() => {
+            this.emitRelayStatus();
         });
 
-        this.ndk.pool.on('notice', (relay, notice) =>
-            console.log(`👀 Notice from ${relay.url}:`, notice)
-        );
-
-        this.ndk.pool.on('relay:auth', (relay, challenge) =>
-            console.log(`🔑 Auth challenge from ${relay.url}:`, challenge)
-        );
-
-        this.ndk.pool.on('relay:ready', (relay) =>
-            console.log(`✅ Relay ready: ${relay.url}`)
-        );
-
-        // More granular connection events
-        this.ndk.pool.on('relay:connect', (relay) =>
-            console.log(`🔗 Relay connected: ${relay.url}`)
-        );
-
-        this.ndk.pool.on('relay:disconnect', (relay) =>
-            console.log(`🔌 Relay disconnected: ${relay.url}`)
-        );
-
-        // Initialize relay health monitoring (handles connect/disconnect logging)
-        this.relayService = new RelayService(this.ndk);
-
         // Initialize publish logger for debugging response delivery
-        this.publishLogger = new PublishLogger(this.ndk);
+        this.publishLogger = new PublishLogger(this.pool);
 
         // Initialize services
         this.keyService = new KeyService({
@@ -140,30 +201,22 @@ class Daemon {
         this.eventService = new EventService();
         setEventService(this.eventService);
 
-        // Initialize connection manager (generates bunker URIs)
+        // Initialize connection manager (generates bunker URIs and sends auth_url responses)
         this.connectionManager = new ConnectionManager({
             key: config.admin.key,
             relays: config.nostr.relays,
             secret: config.admin.secret,
-        }, config.configFile);
+        }, config.configFile, this.pool);
     }
 
     public async start(): Promise<void> {
-        console.log('🔌 Connecting to relays...');
-        await this.ndk.connect(5_000);
+        console.log('Connecting to relays...');
 
-        // Debug: Check relay connection status right after connect
-        // NDK status codes: 1=DISCONNECTED, 2=RECONNECTING, 3=FLAPPING, 4=CONNECTING, 5=CONNECTED, 8=AUTHENTICATED
-        const relayCount = this.ndk.pool.relays.size;
-        let connectedCount = 0;
-        for (const [url, relay] of this.ndk.pool.relays) {
-            const status = relay.status;
-            const statusName = status >= 5 ? 'CONNECTED' : status === 4 ? 'CONNECTING' : status === 3 ? 'FLAPPING' : 'DISCONNECTED';
-            console.log(`   ${url}: status=${status} (${statusName})`);
-            if (status >= 5) connectedCount++;
-        }
-        console.log(`🔌 Connected to ${connectedCount}/${relayCount} relays`);
+        // RelayPool connects lazily, but let's log what we're configured with
+        const relayCount = this.pool.getRelays().length;
+        console.log(`Configured with ${relayCount} relays: ${this.pool.getRelays().join(', ')}`);
 
+        this.subscriptionManager.start();
         this.relayService.start();
         this.publishLogger.start();
         await this.startWebAuth();
@@ -176,7 +229,7 @@ class Daemon {
         await this.startConfiguredKeys();
         await this.loadPlainKeys();
         this.startCleanupTasks();
-        console.log('✅ Signet ready to serve requests.');
+        console.log('Signet ready to serve requests.');
     }
 
     private startCleanupTasks(): void {
@@ -195,7 +248,7 @@ class Daemon {
             const requestMaxAge = new Date(Date.now() - REQUEST_MAX_AGE_MS);
             const deletedRequests = await requestRepository.cleanupExpired(requestMaxAge);
             if (deletedRequests > 0) {
-                console.log(`🧹 Cleaned up ${deletedRequests} expired request(s) older than 24 hours`);
+                console.log(`Cleaned up ${deletedRequests} expired request(s) older than 24 hours`);
             }
         } catch (error) {
             console.error('Failed to cleanup old requests:', error);
@@ -206,7 +259,7 @@ class Daemon {
             const logMaxAge = new Date(Date.now() - LOG_MAX_AGE_MS);
             const deletedLogs = await logRepository.cleanupExpired(logMaxAge);
             if (deletedLogs > 0) {
-                console.log(`🧹 Cleaned up ${deletedLogs} log(s) older than 30 days`);
+                console.log(`Cleaned up ${deletedLogs} log(s) older than 30 days`);
             }
         } catch (error) {
             console.error('Failed to cleanup old logs:', error);
@@ -216,7 +269,7 @@ class Daemon {
     private async startConfiguredKeys(): Promise<void> {
         const activeKeys = this.keyService.getActiveKeys();
         const names = Object.keys(activeKeys);
-        console.log('🔑 Starting keys:', names.join(', ') || '(none)');
+        console.log('Starting keys:', names.join(', ') || '(none)');
 
         for (const [name, secret] of Object.entries(activeKeys)) {
             await this.startKey(name, secret);
@@ -231,40 +284,43 @@ class Daemon {
 
             const nsec = entry.key.startsWith('nsec1')
                 ? entry.key
-                : nip19.nsecEncode(Buffer.from(entry.key, 'hex'));
+                : (() => {
+                    const { nsecEncode } = require('nostr-tools/nip19');
+                    return nsecEncode(hexToBytes(entry.key));
+                })();
             this.loadKeyMaterial(name, nsec);
         }
     }
 
     private async startKey(name: string, secret: string): Promise<void> {
-        const fastify = this.httpServer?.getFastify();
-        if (!fastify) {
-            console.log(`❌ Cannot start key ${name}: HTTP server not initialized`);
-            return;
+        // Parse secret to bytes
+        let secretBytes: Uint8Array;
+        if (secret.startsWith('nsec1')) {
+            const decoded = nip19Decode(secret);
+            if (decoded.type !== 'nsec') {
+                console.log(`Cannot start key ${name}: Invalid nsec`);
+                return;
+            }
+            secretBytes = decoded.data as Uint8Array;
+        } else {
+            secretBytes = hexToBytes(secret);
         }
 
         try {
-            const signer = new NDKPrivateKeySigner(secret);
-            const hexSecret = signer.privateKey!;
-
-            const backendConfig: BunkerBackendConfig = {
+            const backend = new Nip46Backend({
                 keyName: name,
+                nsec: secretBytes,
+                pool: this.pool,
+                subscriptionManager: this.subscriptionManager,
+                permitCallback: buildAuthorizationCallback(name, this.connectionManager),
                 adminSecret: this.config.admin.secret,
-            };
+            });
 
-            const backend = new BunkerBackend(
-                this.ndk,
-                fastify,
-                hexSecret,
-                buildAuthorizationCallback(name, this.connectionManager),
-                backendConfig,
-                this.config.baseUrl
-            );
-
-            await backend.start();
-            console.log(`🔑 Key "${name}" online.`);
+            backend.start();
+            this.backends.set(name, backend);
+            console.log(`Key "${name}" online.`);
         } catch (error) {
-            console.log(`❌ Failed to start key ${name}: ${(error as Error).message}`);
+            console.log(`Failed to start key ${name}: ${(error as Error).message}`);
         }
     }
 
@@ -273,12 +329,12 @@ class Daemon {
         const portEnv = process.env.SIGNET_PORT ?? process.env.AUTH_PORT;
         const authPort = this.config.authPort ?? (portEnv ? parseInt(portEnv, 10) : undefined);
         if (!authPort) {
-            console.log('⚠️ No authPort configured, HTTP server disabled');
+            console.log('No authPort configured, HTTP server disabled');
             return;
         }
 
         const baseUrl = this.config.baseUrl ?? process.env.EXTERNAL_URL ?? process.env.BASE_URL;
-        console.log(`🌐 Starting HTTP server on port ${authPort}...`);
+        console.log(`Starting HTTP server on port ${authPort}...`);
         this.httpServer = new HttpServer({
             port: authPort,
             host: this.config.authHost ?? process.env.SIGNET_HOST ?? process.env.AUTH_HOST ?? '0.0.0.0',
@@ -297,13 +353,28 @@ class Daemon {
         });
 
         await this.httpServer.start();
-        console.log(`🌐 HTTP server listening on port ${authPort}`);
+        console.log(`HTTP server listening on port ${authPort}`);
     }
 
     private loadKeyMaterial(keyName: string, nsec: string): void {
         this.keyService.loadKeyMaterial(keyName, nsec);
         this.startKey(keyName, nsec).catch((error) => {
-            console.log(`❌ Failed to start key ${keyName}: ${(error as Error).message}`);
+            console.log(`Failed to start key ${keyName}: ${(error as Error).message}`);
+        });
+    }
+
+    private emitRelayStatus(): void {
+        const statuses = this.relayService.getStatus();
+        const connected = this.relayService.getConnectedCount();
+        this.eventService.emitRelaysUpdated({
+            connected,
+            total: statuses.length,
+            relays: statuses.map(s => ({
+                url: s.url,
+                connected: s.connected,
+                lastConnected: s.lastConnected?.toISOString() ?? null,
+                lastDisconnected: s.lastDisconnected?.toISOString() ?? null,
+            })),
         });
     }
 }

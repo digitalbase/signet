@@ -20,7 +20,7 @@ interface UseRequestsResult {
   passwords: Record<string, string>;
   setPassword: (id: string, password: string) => void;
   meta: Record<string, RequestMeta>;
-  approve: (id: string, trustLevel?: TrustLevel, alwaysAllow?: boolean) => Promise<void>;
+  approve: (id: string, trustLevel?: TrustLevel, alwaysAllow?: boolean, allowKind?: number) => Promise<void>;
   loadMore: () => Promise<void>;
   refresh: () => Promise<void>;
   // Search and sort
@@ -184,7 +184,7 @@ export function useRequests(): UseRequestsResult {
     setPasswords(prev => ({ ...prev, [id]: password }));
   }, []);
 
-  const approve = useCallback(async (id: string, trustLevel?: TrustLevel, alwaysAllow?: boolean) => {
+  const approve = useCallback(async (id: string, trustLevel?: TrustLevel, alwaysAllow?: boolean, allowKind?: number) => {
     const request = requests.find(r => r.id === id);
     const requiresPassword = request?.requiresPassword ?? false;
     const password = passwords[id]?.trim() ?? '';
@@ -200,7 +200,7 @@ export function useRequests(): UseRequestsResult {
     setMeta(prev => ({ ...prev, [id]: { state: 'approving' } }));
 
     try {
-      const payload: { password?: string; trustLevel?: TrustLevel; alwaysAllow?: boolean } = {};
+      const payload: { password?: string; trustLevel?: TrustLevel; alwaysAllow?: boolean; allowKind?: number } = {};
       if (requiresPassword) {
         payload.password = password;
       }
@@ -209,6 +209,9 @@ export function useRequests(): UseRequestsResult {
       }
       if (alwaysAllow) {
         payload.alwaysAllow = alwaysAllow;
+      }
+      if (allowKind !== undefined) {
+        payload.allowKind = allowKind;
       }
       const result = await apiPost<{ ok?: boolean; error?: string }>(`/requests/${id}`, payload);
 
@@ -266,6 +269,7 @@ export function useRequests(): UseRequestsResult {
       request.method.toLowerCase().includes(query) ||
       request.npub.toLowerCase().includes(query) ||
       (request.keyName?.toLowerCase().includes(query) ?? false) ||
+      (request.appName?.toLowerCase().includes(query) ?? false) ||
       (request.eventPreview?.kind.toString().includes(query) ?? false)
     );
   });

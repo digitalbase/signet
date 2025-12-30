@@ -1,51 +1,56 @@
-import 'websocket-polyfill';
-import NDK, { NDKNostrRpc, NDKPrivateKeySigner, NDKUser } from '@nostr-dev-kit/ndk';
+import { getPublicKey, finalizeEvent } from 'nostr-tools/pure';
+import { npubEncode, decode as nip19Decode } from 'nostr-tools/nip19';
+import { encrypt as nip44Encrypt, getConversationKey } from 'nostr-tools/nip44';
+import { hexToBytes } from './lib/hex.js';
 import createDebug from 'debug';
 import fs from 'fs';
 import path from 'path';
 import type { ConnectionInfo } from '@signet/types';
 import type { ConfigFile } from '../config/types.js';
 import { loadConfig } from '../config/config.js';
+import type { RelayPool } from './lib/relay-pool.js';
 
 const debug = createDebug('signet:connection');
 
 export interface ConnectionManagerConfig {
-    key: string;
+    key: string;          // Admin key (nsec or hex)
     relays: string[];
     secret?: string;
 }
 
+interface Nip46Response {
+    id: string;
+    result?: string;
+    error?: string;
+}
+
 /**
  * Manages connection information and NIP-46 RPC communication.
- * This is a minimal replacement for AdminInterface that only handles:
+ * Handles:
  * - Generating bunker connection URIs
- * - Providing RPC for auth_url responses to clients
+ * - Sending NIP-46 responses (like auth_url) to clients
  */
 export class ConnectionManager {
     public readonly configFile: string;
-    public rpc: NDKNostrRpc;
 
-    private readonly ndk: NDK;
+    private readonly pool: RelayPool;
+    private readonly nsec: Uint8Array;
+    private readonly pubkey: string;
     private readonly secret?: string;
     private readonly relays: string[];
-    private signerUser?: NDKUser;
     private connectionInfo?: ConnectionInfo;
     private readyResolver?: () => void;
     private readonly readyPromise: Promise<void>;
 
-    constructor(config: ConnectionManagerConfig, configFile: string) {
+    constructor(config: ConnectionManagerConfig, configFile: string, pool: RelayPool) {
         this.configFile = configFile;
         this.secret = config.secret;
         this.relays = config.relays;
+        this.pool = pool;
 
-        this.ndk = new NDK({
-            explicitRelayUrls: config.relays,
-            signer: new NDKPrivateKeySigner(config.key),
-        });
-        // Pass relay URLs so RPC creates its own connected pool for publishing
-        this.rpc = new NDKNostrRpc(this.ndk, this.ndk.signer!, debug, config.relays);
-        // NIP-46 spec requires NIP-44 encryption (NDK defaults to nip04)
-        this.rpc.encryptionType = 'nip44';
+        // Parse the admin key
+        this.nsec = this.parseSecretKey(config.key);
+        this.pubkey = getPublicKey(this.nsec);
 
         this.readyPromise = new Promise((resolve) => {
             this.readyResolver = resolve;
@@ -54,17 +59,21 @@ export class ConnectionManager {
         this.initialize();
     }
 
-    private async initialize(): Promise<void> {
-        try {
-            // Connect to relays so RPC responses can be sent
-            await this.ndk.connect();
-
-            this.signerUser = await this.ndk.signer?.user();
-            if (!this.signerUser) {
-                throw new Error('Unable to derive signer user');
+    private parseSecretKey(key: string): Uint8Array {
+        if (key.startsWith('nsec1')) {
+            const decoded = nip19Decode(key);
+            if (decoded.type !== 'nsec') {
+                throw new Error('Invalid nsec key');
             }
+            return decoded.data as Uint8Array;
+        }
+        // Assume hex
+        return hexToBytes(key);
+    }
 
-            this.writeConnectionStrings(this.signerUser);
+    private initialize(): void {
+        try {
+            this.writeConnectionStrings();
         } catch (error) {
             console.log(`Failed to initialize connection manager: ${(error as Error).message}`);
             this.readyResolver?.();
@@ -89,18 +98,57 @@ export class ConnectionManager {
 
     /**
      * Ensure relay connections are active before sending.
-     * Call this before using rpc.sendResponse() to handle disconnections.
+     * Call this before using sendResponse() to handle disconnections.
      */
     public async ensureConnected(): Promise<void> {
-        await this.ndk.pool.connect();
+        await this.pool.ensureConnected();
     }
 
-    private writeConnectionStrings(user: NDKUser): void {
+    /**
+     * Send a NIP-46 response to a remote client.
+     * This is used for sending auth_url responses during the authorization flow.
+     */
+    public async sendResponse(
+        requestId: string,
+        remotePubkey: string,
+        result: string,
+        error?: string,
+        authUrl?: string
+    ): Promise<void> {
+        const response: Nip46Response = error
+            ? { id: requestId, result, error }
+            : { id: requestId, result };
+
+        // If this is an auth_url response, include it in the error field
+        // per NIP-46 spec: auth_url is sent as error with result='auth_url'
+        if (authUrl) {
+            response.result = 'auth_url';
+            response.error = authUrl;
+        }
+
+        // Encrypt with NIP-44
+        const conversationKey = getConversationKey(this.nsec, remotePubkey);
+        const encrypted = nip44Encrypt(JSON.stringify(response), conversationKey);
+
+        // Create and sign event
+        const event = finalizeEvent({
+            kind: 24133,
+            content: encrypted,
+            tags: [['p', remotePubkey]],
+            created_at: Math.floor(Date.now() / 1000),
+        }, this.nsec);
+
+        debug('sending response %s to %s', requestId, npubEncode(remotePubkey));
+        await this.pool.publish(event);
+    }
+
+    private writeConnectionStrings(): void {
         const relays = this.resolveConnectionRelays();
         const secret = this.secret?.trim().toLowerCase() || undefined;
+        const npub = npubEncode(this.pubkey);
 
-        const hexUri = this.buildBunkerUri(user.pubkey, relays, secret);
-        const npubUri = this.buildBunkerUri(user.npub, relays, secret);
+        const hexUri = this.buildBunkerUri(this.pubkey, relays, secret);
+        const npubUri = this.buildBunkerUri(npub, relays, secret);
 
         console.log(`\nConnection URI (hex): ${hexUri}\n`);
 
@@ -109,8 +157,8 @@ export class ConnectionManager {
         fs.writeFileSync(path.join(folder, 'connection.txt'), `${hexUri}\n`);
 
         this.connectionInfo = {
-            npub: user.npub,
-            pubkey: user.pubkey,
+            npub,
+            pubkey: this.pubkey,
             npubUri,
             hexUri,
             relays,

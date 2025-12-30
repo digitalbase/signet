@@ -7,6 +7,7 @@ export interface LogEntry {
     method: string | null;
     params: string | null;
     keyUserId: number | null;
+    autoApproved: boolean;
     KeyUser?: {
         keyName: string;
         userPubkey: string;
@@ -22,6 +23,7 @@ export interface ActivityEntry {
     keyName?: string;
     userPubkey?: string;
     appName?: string;
+    autoApproved: boolean;
 }
 
 export class LogRepository {
@@ -30,6 +32,7 @@ export class LogRepository {
         method?: string;
         params?: string;
         keyUserId?: number;
+        autoApproved?: boolean;
     }): Promise<LogEntry> {
         return prisma.log.create({
             data: {
@@ -38,6 +41,7 @@ export class LogRepository {
                 method: data.method,
                 params: data.params,
                 keyUserId: data.keyUserId,
+                autoApproved: data.autoApproved ?? false,
             },
         });
     }
@@ -91,6 +95,7 @@ export class LogRepository {
             keyName: log.KeyUser?.keyName ?? undefined,
             userPubkey: log.KeyUser?.userPubkey ?? undefined,
             appName: log.KeyUser?.description ?? undefined,
+            autoApproved: log.autoApproved,
         };
     }
 }

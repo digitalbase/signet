@@ -66,6 +66,9 @@ export async function processRequestWebHandler(
         // Get alwaysAllow flag from request body (default to false for one-time approval)
         const alwaysAllow = request.body?.alwaysAllow === true;
 
+        // Get allowKind for kind-specific permissions (optional)
+        const allowKind = typeof request.body?.allowKind === 'number' ? request.body.allowKind : undefined;
+
         await prisma.request.update({
             where: { id: record.id },
             data: {
@@ -94,7 +97,8 @@ export async function processRequestWebHandler(
                 }
             } else if (alwaysAllow) {
                 // For non-connect requests with "always allow", grant the specific method for future requests
-                const scope: AllowScope = { kind: 'all' };
+                // If allowKind is specified, only grant for that kind; otherwise grant for all kinds
+                const scope: AllowScope = allowKind !== undefined ? { kind: allowKind } : { kind: 'all' };
                 await permitAllRequests(record.remotePubkey, record.keyName, record.method, undefined, scope);
             }
             // If alwaysAllow is false, we only approve this single request (no SigningCondition created)

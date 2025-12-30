@@ -118,11 +118,12 @@ When `false` (default), the API is open for local development. Set to `true` for
 
 ### `admin.secret`
 
-Secret included in the bunker connection URI. Used for client authentication when connecting to the bunker.
+Secret included in the bunker connection URI. Used to validate connection attempts from NIP-46 clients.
 
 - **Type**: string (hex-encoded)
 - **Default**: Auto-generated 256-bit secret on first run
 - **Note**: This is separate from `jwtSecret` which is used for REST API auth.
+- **Behavior**: The secret validates that a client has the correct bunker URI, but does **not** auto-approve the connection. All first-time connections require manual approval via the UI, where you select a trust level. Invalid secrets are silently rejected.
 
 ## Rate Limiting
 
@@ -166,3 +167,7 @@ The `EXTERNAL_URL` environment variable is particularly important for Docker dep
 > **Note:** Legacy variable names (`AUTH_PORT`, `AUTH_HOST`, `BASE_URL`, `PORT`, `HOST`) are still supported for backward compatibility but are deprecated.
 
 All other settings are configured in `signet.json`.
+
+---
+
+For deployment guides (Tailscale, reverse proxies, etc.), see [DEPLOYMENT.md](DEPLOYMENT.md).

@@ -19,6 +19,8 @@ This launches:
 - Daemon + REST API on `http://localhost:3000`
 - Web dashboard on `http://localhost:4174`
 
+> **Note:** Signet is designed for self-hosters on trusted networks (Tailscale, Wireguard, local LAN). There is no login page - access control is handled at the network layer. Public internet deployment with authentication is planned for a future release.
+
 Add keys via CLI or through the web UI:
 
 ```bash
@@ -77,5 +79,6 @@ See [docs/SECURITY.md](docs/SECURITY.md) for the full security model.
 ## Documentation
 
 - [Configuration Reference](docs/CONFIGURATION.md) - All config options
+- [Deployment Guide](docs/DEPLOYMENT.md) - Tailscale, reverse proxies, etc.
 - [Security Model](docs/SECURITY.md) - Security architecture and threat model
 - [API Reference](docs/API.md) - REST API endpoints

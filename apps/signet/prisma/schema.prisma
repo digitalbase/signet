@@ -17,9 +17,13 @@ model Request {
     method        String
     params        String?
     allowed       Boolean?
+    autoApproved  Boolean   @default(false)
+    keyUserId     Int?
+    KeyUser       KeyUser?  @relation(fields: [keyUserId], references: [id])
 
     @@index([allowed, createdAt])
     @@index([remotePubkey])
+    @@index([keyUserId])
 }
 
 model KeyUser {
@@ -35,6 +39,7 @@ model KeyUser {
   logs              Log[]
   signingConditions SigningCondition[]
   Token             Token[]
+  requests          Request[]
 
   @@unique([keyName, userPubkey], name: "unique_key_user")
   @@index([revokedAt])
@@ -63,13 +68,14 @@ model SigningCondition {
 }
 
 model Log {
-  id        Int      @id @default(autoincrement())
-  timestamp DateTime
-  type      String
-  method    String?
-  params    String?
-  keyUserId Int?
-  KeyUser   KeyUser? @relation(fields: [keyUserId], references: [id])
+  id           Int      @id @default(autoincrement())
+  timestamp    DateTime
+  type         String
+  method       String?
+  params       String?
+  keyUserId    Int?
+  autoApproved Boolean  @default(false)
+  KeyUser      KeyUser? @relation(fields: [keyUserId], references: [id])
 
   @@index([timestamp])
   @@index([keyUserId])

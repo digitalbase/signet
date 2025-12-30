@@ -20,7 +20,7 @@ Signet generates its own private key, which is used for NIP-46 bunker communicat
 
 Administration is performed exclusively via the web UI, which requires JWT authentication. The web UI should be secured via network-level access control through the use of VPN/Wireguard/Tailscale, firewall rules, and reverse proxy authentication.
 
-We currently recommend running this on a locally trust machine only.
+We currently recommend running this on a locally trusted machine only.
 
 ## NIP-46 (Nostr Connect)
 
@@ -156,3 +156,4 @@ All secrets (JWT secret, admin secret) are generated using Node.js `crypto.rando
 5. **Monitor logs**: Enable verbose logging and monitor for suspicious activity
 6. **Restrict network access**: Use VPN, firewall rules, or reverse proxy authentication to limit access to the web UI
 7. **Regular updates**: Keep Signet updated to receive security patches
+8. **See [DEPLOYMENT.md](DEPLOYMENT.md)**: For specific setup guides (Tailscale, reverse proxies)

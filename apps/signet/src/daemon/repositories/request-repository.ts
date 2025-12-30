@@ -17,17 +17,30 @@ export interface RequestRecord {
     allowed: boolean | null;
     createdAt: Date;
     processedAt: Date | null;
+    autoApproved: boolean;
+    keyUserId: number | null;
+    KeyUser?: {
+        keyName: string;
+        userPubkey: string;
+        description: string | null;
+    } | null;
 }
 
 export class RequestRepository {
     private readonly REQUEST_TTL_MS = 60_000;
 
     async findById(id: string): Promise<RequestRecord | null> {
-        return prisma.request.findUnique({ where: { id } });
+        return prisma.request.findUnique({
+            where: { id },
+            include: { KeyUser: true },
+        });
     }
 
     async findPending(id: string): Promise<RequestRecord | null> {
-        const record = await prisma.request.findUnique({ where: { id } });
+        const record = await prisma.request.findUnique({
+            where: { id },
+            include: { KeyUser: true },
+        });
         if (!record || record.allowed !== null) {
             return null;
         }
@@ -59,11 +72,18 @@ export class RequestRepository {
             orderBy: { createdAt: 'desc' },
             skip: options.offset,
             take: options.limit,
+            include: { KeyUser: true },
         });
     }
 
     async countPending(): Promise<number> {
-        return prisma.request.count({ where: { allowed: null } });
+        const expiryThreshold = new Date(Date.now() - this.REQUEST_TTL_MS);
+        return prisma.request.count({
+            where: {
+                allowed: null,
+                createdAt: { gte: expiryThreshold },
+            },
+        });
     }
 
     async approve(id: string): Promise<void> {
@@ -93,8 +113,31 @@ export class RequestRepository {
         method: string;
         remotePubkey: string;
         params?: string;
+        keyUserId?: number;
     }): Promise<RequestRecord> {
-        return prisma.request.create({ data });
+        return prisma.request.create({
+            data,
+            include: { KeyUser: true },
+        });
+    }
+
+    async createAutoApproved(data: {
+        requestId: string;
+        keyName: string;
+        method: string;
+        remotePubkey: string;
+        params?: string;
+        keyUserId?: number;
+    }): Promise<RequestRecord> {
+        return prisma.request.create({
+            data: {
+                ...data,
+                allowed: true,
+                autoApproved: true,
+                processedAt: new Date(),
+            },
+            include: { KeyUser: true },
+        });
     }
 
     async cleanupExpired(maxAge: Date): Promise<number> {
@@ -105,6 +148,20 @@ export class RequestRepository {
             },
         });
         return result.count;
+    }
+
+    /**
+     * Look up keyUserId for a given keyName and remotePubkey.
+     * Used to link requests to their KeyUser (app).
+     */
+    async findKeyUserId(keyName: string, remotePubkey: string): Promise<number | null> {
+        const keyUser = await prisma.keyUser.findUnique({
+            where: {
+                unique_key_user: { keyName, userPubkey: remotePubkey },
+            },
+            select: { id: true },
+        });
+        return keyUser?.id ?? null;
     }
 }
 

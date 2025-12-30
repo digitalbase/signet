@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { PendingRequest, ConnectedApp, DashboardStats, KeyInfo } from '@signet/types';
+import type { PendingRequest, ConnectedApp, DashboardStats, KeyInfo, RelayStatusResponse, ActivityEntry } from '@signet/types';
 
 /**
  * Server-sent event types matching the backend event-service.ts
@@ -10,11 +10,13 @@ export type ServerEvent =
   | { type: 'request:approved'; requestId: string }
   | { type: 'request:denied'; requestId: string }
   | { type: 'request:expired'; requestId: string }
+  | { type: 'request:auto_approved'; activity: ActivityEntry }
   | { type: 'app:connected'; app: ConnectedApp }
   | { type: 'key:created'; key: KeyInfo }
   | { type: 'key:unlocked'; keyName: string }
   | { type: 'key:deleted'; keyName: string }
   | { type: 'stats:updated'; stats: DashboardStats }
+  | { type: 'relays:updated'; relays: RelayStatusResponse }
   | { type: 'ping' };
 
 export type ServerEventCallback = (event: ServerEvent) => void;

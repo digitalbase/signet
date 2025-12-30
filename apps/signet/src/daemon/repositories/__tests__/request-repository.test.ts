@@ -11,6 +11,9 @@ vi.mock('../../../db.js', () => ({
       count: vi.fn().mockResolvedValue(0),
       update: vi.fn(),
     },
+    keyUser: {
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
   },
 }));
 
@@ -36,6 +39,7 @@ describe('RequestRepository', () => {
       expect(result).toEqual(mockRequest);
       expect(mockPrisma.request.findUnique).toHaveBeenCalledWith({
         where: { id: 'test-request-id' },
+        include: { KeyUser: true },
       });
     });
 
@@ -77,14 +81,17 @@ describe('RequestRepository', () => {
   });
 
   describe('countPending', () => {
-    it('should return count of pending requests', async () => {
+    it('should return count of pending non-expired requests', async () => {
       mockPrisma.request.count.mockResolvedValue(5);
 
       const result = await repository.countPending();
 
       expect(result).toBe(5);
       expect(mockPrisma.request.count).toHaveBeenCalledWith({
-        where: { allowed: null },
+        where: {
+          allowed: null,
+          createdAt: { gte: expect.any(Date) },
+        },
       });
     });
   });

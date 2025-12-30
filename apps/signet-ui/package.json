@@ -14,7 +14,6 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@nostr-dev-kit/ndk": "^2.18.1",
     "@signet/types": "workspace:*",
     "debug": "^4.3.4",
     "express": "^4.19.2",

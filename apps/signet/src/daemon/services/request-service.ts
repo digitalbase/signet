@@ -85,6 +85,8 @@ export class RequestService {
             ttlSeconds: Math.max(0, Math.round((expiresAt - nowMillis) / 1_000)),
             requiresPassword,
             processedAt: record.processedAt?.toISOString() ?? null,
+            autoApproved: record.autoApproved,
+            appName: record.KeyUser?.description ?? null,
         };
     }
 }
