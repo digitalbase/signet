@@ -151,7 +151,21 @@ Set this token in your environment or `.env` file:
 SIGNET_API_TOKEN=your_generated_token_here
 ```
 
-The daemon validates this token in the `X-API-Token` header sent by the UI proxy. Without a matching token, requests from the UI proxy will be rejected when `requireAuth` is enabled.
+**Security Model:**
+
+The `SIGNET_API_TOKEN` provides **proxy authentication** - it verifies that requests are coming from your trusted UI proxy server. This token:
+
+1. ✅ Authenticates the UI proxy server identity
+2. ⚠️ **Does NOT bypass user authentication** - the browser must still have a valid JWT session
+3. ⚠️ **Does NOT bypass CSRF protection** - state-changing requests still require CSRF tokens
+4. ⚠️ **Does NOT bypass rate limiting** - rate limits still apply
+
+When a request arrives at the daemon:
+- First, the daemon validates the `X-API-Token` header matches the configured token (proxy authentication)
+- Then, the daemon validates the user's JWT session from cookies/headers (user authentication)
+- Finally, CSRF tokens and rate limiting are enforced as normal
+
+This layered approach ensures that even if the API token leaks, attackers cannot bypass user authentication or perform unauthorized actions.
 
 ### `admin.secret`
 
