@@ -1,4 +1,3 @@
-import { config as dotenvConfig } from 'dotenv';
 import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import path from 'node:path';
@@ -11,8 +10,16 @@ import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import auth from 'basic-auth';
 
-// Load .env from repository root (two levels up)
-dotenvConfig({ path: path.resolve(__dirname, '../../.env') });
+// Load .env from repository root (two levels up) in development
+// In production (NODE_ENV=production), dotenv may not be installed
+if (process.env.NODE_ENV !== 'production') {
+  try {
+    const { config } = await import('dotenv');
+    config({ path: path.resolve(__dirname, '../../.env') });
+  } catch {
+    // dotenv not available, skip .env loading (production mode)
+  }
+}
 
 const app = express();
 
