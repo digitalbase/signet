@@ -246,8 +246,13 @@ export function sanitizeCallbackUrl(url: string | null | undefined): string | nu
  * Create authentication middleware for protected routes
  * @param fastify - Fastify instance
  * @param requireAuth - If false, skip authentication (for local-only deployments)
+ * @param apiToken - Optional API token for server-to-server authentication
  */
-export function createAuthMiddleware(fastify: FastifyInstance, requireAuth: boolean = true) {
+export function createAuthMiddleware(
+    fastify: FastifyInstance,
+    requireAuth: boolean = true,
+    apiToken?: string
+) {
     return async function authMiddleware(
         request: FastifyRequest,
         reply: FastifyReply
@@ -257,6 +262,16 @@ export function createAuthMiddleware(fastify: FastifyInstance, requireAuth: bool
             return;
         }
 
+        // Check for API token in X-API-Token header (for UI proxy)
+        if (apiToken) {
+            const requestApiToken = request.headers['x-api-token'] as string | undefined;
+            if (requestApiToken && timingSafeEqual(requestApiToken, apiToken)) {
+                // Valid API token - allow access
+                return;
+            }
+        }
+
+        // Fall back to JWT token validation
         const payload = await verifyToken(fastify, request);
 
         if (!payload) {
