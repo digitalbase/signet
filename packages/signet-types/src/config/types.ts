@@ -72,6 +72,8 @@ export interface ConfigFile {
     allowedOrigins?: string[];
     /** Require authentication for API access (default: false for local use) */
     requireAuth?: boolean;
+    /** API token for server-to-server authentication (e.g., UI proxy to daemon) */
+    apiToken?: string;
     /** Kill switch configuration for remote admin commands */
     killSwitch?: KillSwitchConfig;
 }

@@ -35,6 +35,7 @@ export async function loadConfig(configPath: string): Promise<ConfigFile> {
             keys: {},
             verbose: false,
             jwtSecret: generateSecret(32),
+            apiToken: generateSecret(32),
             allowedOrigins: [
                 'http://localhost:4174',
                 'http://localhost:3000',
@@ -44,7 +45,7 @@ export async function loadConfig(configPath: string): Promise<ConfigFile> {
             authPort: 3000,
             authHost: '0.0.0.0',
             baseUrl: 'http://localhost:4174',
-            requireAuth: false,
+            requireAuth: true,
         };
         needsSave = true;
     } else {
@@ -72,6 +73,12 @@ export async function loadConfig(configPath: string): Promise<ConfigFile> {
         // Generate JWT secret if not present
         if (!config.jwtSecret) {
             config.jwtSecret = generateSecret(32);
+            needsSave = true;
+        }
+
+        // Generate API token if not present
+        if (!config.apiToken) {
+            config.apiToken = generateSecret(32);
             needsSave = true;
         }
 
