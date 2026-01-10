@@ -243,15 +243,39 @@ export function sanitizeCallbackUrl(url: string | null | undefined): string | nu
 }
 
 /**
+ * Create proxy authentication middleware to verify the UI proxy identity
+ * @param apiToken - API token for server-to-server authentication
+ */
+export function createProxyAuthMiddleware(apiToken?: string) {
+    return async function proxyAuthMiddleware(
+        request: FastifyRequest,
+        reply: FastifyReply
+    ): Promise<void> {
+        // If no API token configured, skip proxy auth (local development)
+        if (!apiToken) {
+            return;
+        }
+
+        // Verify the proxy is authenticated
+        const requestApiToken = request.headers['x-api-token'] as string | undefined;
+        if (!requestApiToken || !timingSafeEqual(requestApiToken, apiToken)) {
+            reply.code(401).send({ error: 'Proxy authentication required' });
+            return;
+        }
+
+        // Mark request as coming from authenticated proxy
+        (request as any).isProxyAuthenticated = true;
+    };
+}
+
+/**
  * Create authentication middleware for protected routes
  * @param fastify - Fastify instance
  * @param requireAuth - If false, skip authentication (for local-only deployments)
- * @param apiToken - Optional API token for server-to-server authentication
  */
 export function createAuthMiddleware(
     fastify: FastifyInstance,
-    requireAuth: boolean = true,
-    apiToken?: string
+    requireAuth: boolean = true
 ) {
     return async function authMiddleware(
         request: FastifyRequest,
@@ -262,16 +286,7 @@ export function createAuthMiddleware(
             return;
         }
 
-        // Check for API token in X-API-Token header (for UI proxy)
-        if (apiToken) {
-            const requestApiToken = request.headers['x-api-token'] as string | undefined;
-            if (requestApiToken && timingSafeEqual(requestApiToken, apiToken)) {
-                // Valid API token - allow access
-                return;
-            }
-        }
-
-        // Fall back to JWT token validation
+        // Require JWT token validation for user authentication
         const payload = await verifyToken(fastify, request);
 
         if (!payload) {
@@ -399,6 +414,7 @@ export function checkRateLimit(
 
 /**
  * Create rate limiting middleware for sensitive endpoints
+ * Rate limiting is applied regardless of API token authentication
  */
 export function createRateLimitMiddleware(endpoint: string = 'default') {
     return async function rateLimitMiddleware(
