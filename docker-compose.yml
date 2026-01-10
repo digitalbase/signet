@@ -14,11 +14,12 @@ services:
       DATABASE_URL: ${DATABASE_URL:-file:/app/config/signet.db}
       SIGNET_BIND_PORT: ${SIGNET_BIND_PORT:-3000}
       SIGNET_BIND_ADDRESS: ${SIGNET_BIND_ADDRESS:-0.0.0.0}
-      UI_URL: ${UI_URL:-http://${UI_HOST:-localhost}:${UI_PORT:-4174}}
+      SIGNET_URL: ${SIGNET_URL:-http://${SIGNET_BIND_PORT:-signet}:${SIGNET_BIND_ADDRESS:-3000}}
+
     ports:
       - "${SIGNET_BIND_PORT:-3000}:3000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://${SIGNET_BIND_ADDRESS:-localhost}:${SIGNET_BIND_PORT:-3000}/health >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -35,7 +36,7 @@ services:
     environment:
       UI_BIND_PORT: ${UI_BIND_PORT:-4174}
       UI_BIND_ADDRESS: ${UI_BIND_ADDRESS:-0.0.0.0}
-      SIGNET_URL: ${SIGNET_URL:-http://${SIGNET_HOST:-signet}:${SIGNET_PORT:-3000}}
+      UI_URL: ${UI_URL:-http://${UI_BIND_PORT:-localhost}:${UI_BIND_ADDRESS:-4174}}
       UI_AUTH_USERNAME: ${UI_AUTH_USERNAME:-}
       UI_AUTH_PASSWORD: ${UI_AUTH_PASSWORD:-}
     ports:
