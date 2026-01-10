@@ -21,7 +21,7 @@ const port = Number.parseInt(process.env.UI_BIND_PORT ?? process.env.PORT ?? '41
 const host = process.env.UI_BIND_ADDRESS ?? '0.0.0.0';
 const signetHost = process.env.SIGNET_HOST ?? 'localhost';
 const signetPort = process.env.SIGNET_PORT ?? '3000';
-const daemonUrl = process.env.DAEMON_URL ?? `http://${signetHost}:${signetPort}`;
+const signetUrl = process.env.SIGNET_URL ?? `http://${signetHost}:${signetPort}`;
 
 // Basic auth configuration (disabled by default)
 const authUsername = process.env.UI_AUTH_USERNAME;
@@ -75,7 +75,7 @@ const apiPaths = [
 
 // SSE proxy for /events endpoint (no timeout, streaming)
 const sseProxy = createProxyMiddleware({
-  target: daemonUrl,
+  target: signetUrl,
   changeOrigin: true,
   proxyTimeout: 0,
   timeout: 0,
@@ -99,7 +99,7 @@ const sseProxy = createProxyMiddleware({
 
 // API proxy for standard endpoints
 const apiProxy = createProxyMiddleware({
-  target: daemonUrl,
+  target: signetUrl,
   changeOrigin: true,
   proxyTimeout: 10_000,
   pathFilter: apiPaths,
@@ -142,5 +142,5 @@ app.get('*', (_req, res) => {
 
 app.listen(port, host, () => {
   const authStatus = isAuthEnabled ? ' [Basic Auth Enabled]' : '';
-  console.log(`Signet UI listening on http://${host}:${port} (proxying ${daemonUrl})${authStatus}`);
+  console.log(`Signet UI listening on http://${host}:${port} (proxying ${signetUrl})${authStatus}`);
 });

@@ -20,7 +20,7 @@ RUN npm install --no-save express@4 http-proxy-middleware@3 basic-auth@2
 # Environment variables (can be overridden at runtime)
 ENV UI_BIND_PORT=4174
 ENV UI_BIND_ADDRESS=0.0.0.0
-ENV DAEMON_URL=http://signet:3000
+ENV SIGNET_URL=http://signet:3000
 
 EXPOSE 4174
 CMD ["node", "server.mjs"]
