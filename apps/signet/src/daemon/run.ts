@@ -603,6 +603,7 @@ class Daemon {
             host: this.config.authHost ?? process.env.SIGNET_HOST ?? process.env.AUTH_HOST ?? '0.0.0.0',
             baseUrl,
             jwtSecret: this.config.jwtSecret,
+            apiToken: this.config.apiToken,
             allowedOrigins: this.config.allowedOrigins ?? [],
             requireAuth: this.config.requireAuth ?? false,
             connectionManager: this.connectionManager,
