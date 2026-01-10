@@ -14,7 +14,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-file:/app/config/signet.db}
       SIGNET_BIND_PORT: ${SIGNET_BIND_PORT:-3000}
       SIGNET_BIND_ADDRESS: ${SIGNET_BIND_ADDRESS:-0.0.0.0}
-      EXTERNAL_URL: ${EXTERNAL_URL:-http://${UI_HOST:-localhost}:${UI_PORT:-4174}}
+      UI_URL: ${UI_URL:-http://${UI_HOST:-localhost}:${UI_PORT:-4174}}
     ports:
       - "${SIGNET_BIND_PORT:-3000}:3000"
     healthcheck:

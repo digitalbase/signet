@@ -216,7 +216,7 @@ Docker Compose works out of the box with no `.env` file required. To customize s
 SIGNET_PORT=3001 UI_PORT=8080 docker compose up --build
 
 # Or set explicit URLs for complex networking
-SIGNET_URL=http://signet.local:3000 EXTERNAL_URL=https://ui.example.com docker compose up --build
+SIGNET_URL=http://signet.local:3000 UI_URL=https://ui.example.com docker compose up --build
 ```
 
 ### Daemon Variables (`signet`)
@@ -226,9 +226,9 @@ SIGNET_URL=http://signet.local:3000 EXTERNAL_URL=https://ui.example.com docker c
 | `SIGNET_BIND_ADDRESS` | Network interface to bind to | `0.0.0.0` (all interfaces) |
 | `SIGNET_HOST` | Hostname where daemon is accessible | `localhost` (or `signet` in Docker) |
 | `SIGNET_PORT` | Port for the REST API | `3000` |
-| `UI_HOST` | Hostname where UI is accessible (used for `EXTERNAL_URL` if not set) | `localhost` |
-| `UI_PORT` | Port where UI is accessible (used for `EXTERNAL_URL` if not set) | `4174` |
-| `EXTERNAL_URL` | Public URL of the UI (for authorization flow). Defaults to `http://${UI_HOST}:${UI_PORT}` | `http://localhost:4174` |
+| `UI_HOST` | Hostname where UI is accessible (used for `UI_URL` if not set) | `localhost` |
+| `UI_PORT` | Port where UI is accessible (used for `UI_URL` if not set) | `4174` |
+| `UI_URL` | Public URL of the UI (for authorization flow). Defaults to `http://${UI_HOST}:${UI_PORT}` | `http://localhost:4174` |
 | `DATABASE_URL` | SQLite database path | `file:~/.signet-config/signet.db` |
 | `SIGNET_LOCAL` | Set to `1` for local development (uses relative DB path) | (not set) |
 | `NODE_ENV` | Set to `development` for dev mode | `production` |
@@ -247,7 +247,7 @@ SIGNET_URL=http://signet.local:3000 EXTERNAL_URL=https://ui.example.com docker c
 
 **How the services communicate:**
 - **UI → Daemon**: The UI uses `SIGNET_URL` to proxy API requests to the daemon
-- **Daemon → User**: The daemon uses `EXTERNAL_URL` to send authorization redirect URLs
+- **Daemon → User**: The daemon uses `UI_URL` to send authorization redirect URLs
 
 **Network binding:**
 - Both services bind to `0.0.0.0` (all interfaces) by default
