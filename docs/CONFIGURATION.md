@@ -192,7 +192,7 @@ DAEMON_URL=http://signet.local:3000 EXTERNAL_URL=https://ui.example.com docker c
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SIGNET_BIND_HOST` | Network interface to bind to | `0.0.0.0` (all interfaces) |
+| `SIGNET_BIND_ADDRESS` | Network interface to bind to | `0.0.0.0` (all interfaces) |
 | `SIGNET_HOST` | Hostname where daemon is accessible | `localhost` (or `signet` in Docker) |
 | `SIGNET_PORT` | Port for the REST API | `3000` |
 | `UI_HOST` | Hostname where UI is accessible (used for `EXTERNAL_URL` if not set) | `localhost` |
@@ -206,7 +206,7 @@ DAEMON_URL=http://signet.local:3000 EXTERNAL_URL=https://ui.example.com docker c
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `UI_BIND_HOST` | Network interface to bind to | `0.0.0.0` (all interfaces) |
+| `UI_BIND_ADDRESS` | Network interface to bind to | `0.0.0.0` (all interfaces) |
 | `UI_PORT` | Port for the React UI | `4174` |
 | `SIGNET_HOST` | Hostname where daemon is accessible (used for `DAEMON_URL` if not set) | `localhost` (or `signet` in Docker) |
 | `SIGNET_PORT` | Port where daemon is accessible (used for `DAEMON_URL` if not set) | `3000` |
@@ -218,16 +218,16 @@ DAEMON_URL=http://signet.local:3000 EXTERNAL_URL=https://ui.example.com docker c
 
 **Network binding:**
 - Both services bind to `0.0.0.0` (all interfaces) by default
-- Use `SIGNET_BIND_HOST` and `UI_BIND_HOST` to bind to specific interfaces (e.g., `127.0.0.1` for localhost only, or a Tailscale IP like `100.x.x.x`)
+- Use `SIGNET_BIND_ADDRESS` and `UI_BIND_ADDRESS` to bind to specific interfaces (e.g., `127.0.0.1` for localhost only, or a Tailscale IP like `100.x.x.x`)
 - The `*_HOST` and `*_PORT` variables are used to construct the URLs for service discovery, not for binding
 
 **Example use cases:**
 ```bash
 # Bind to Tailscale interface only
-SIGNET_BIND_HOST=100.101.102.103 UI_BIND_HOST=100.101.102.103 docker compose up
+SIGNET_BIND_ADDRESS=100.101.102.103 UI_BIND_ADDRESS=100.101.102.103 docker compose up
 
 # Localhost only (not accessible from network)
-SIGNET_BIND_HOST=127.0.0.1 UI_BIND_HOST=127.0.0.1 docker compose up
+SIGNET_BIND_ADDRESS=127.0.0.1 UI_BIND_ADDRESS=127.0.0.1 docker compose up
 ```
 
 > **Note:** The `authHost` config field is no longer used.
