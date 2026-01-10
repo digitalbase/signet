@@ -2,6 +2,8 @@ import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readFileSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import auth from 'basic-auth';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -18,6 +20,23 @@ const daemonUrl = process.env.DAEMON_URL ?? 'http://localhost:3000';
 const authUsername = process.env.UI_AUTH_USERNAME;
 const authPassword = process.env.UI_AUTH_PASSWORD;
 const isAuthEnabled = authUsername && authPassword;
+
+// Load API token from daemon config file
+let apiToken = null;
+const configPath = process.env.SIGNET_CONFIG ?? path.join(homedir(), '.signet', 'config.json');
+if (existsSync(configPath)) {
+  try {
+    const config = JSON.parse(readFileSync(configPath, 'utf8'));
+    apiToken = config.apiToken;
+    if (apiToken) {
+      console.log('✓ Loaded API token from daemon config');
+    }
+  } catch (err) {
+    console.warn('⚠️  Failed to load daemon config:', err.message);
+  }
+} else {
+  console.warn('⚠️  Daemon config not found at', configPath);
+}
 
 // Shared error handler for proxies
 const onProxyError = (err, req, res) => {
@@ -58,6 +77,9 @@ const sseProxy = createProxyMiddleware({
       proxyReq.setHeader('Accept', 'text/event-stream');
       proxyReq.setHeader('Cache-Control', 'no-cache');
       proxyReq.setHeader('Connection', 'keep-alive');
+      if (apiToken) {
+        proxyReq.setHeader('X-API-Token', apiToken);
+      }
     },
     proxyRes(proxyRes) {
       proxyRes.headers['x-accel-buffering'] = 'no';
@@ -74,6 +96,11 @@ const apiProxy = createProxyMiddleware({
   proxyTimeout: 10_000,
   pathFilter: apiPaths,
   on: {
+    proxyReq(proxyReq) {
+      if (apiToken) {
+        proxyReq.setHeader('X-API-Token', apiToken);
+      }
+    },
     error: onProxyError
   }
 });
