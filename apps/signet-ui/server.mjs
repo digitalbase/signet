@@ -2,6 +2,7 @@ import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import auth from 'basic-auth';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,6 +13,11 @@ const app = express();
 const port = Number.parseInt(process.env.UI_PORT ?? process.env.PORT ?? '4174', 10);
 const host = process.env.UI_HOST ?? process.env.HOST ?? '0.0.0.0';
 const daemonUrl = process.env.DAEMON_URL ?? 'http://localhost:3000';
+
+// Basic auth configuration (disabled by default)
+const authUsername = process.env.UI_AUTH_USERNAME;
+const authPassword = process.env.UI_AUTH_PASSWORD;
+const isAuthEnabled = authUsername && authPassword;
 
 // Shared error handler for proxies
 const onProxyError = (err, req, res) => {
@@ -73,6 +79,20 @@ const apiProxy = createProxyMiddleware({
   }
 });
 
+// Basic authentication middleware
+if (isAuthEnabled) {
+  app.use((req, res, next) => {
+    const credentials = auth(req);
+
+    if (!credentials || credentials.name !== authUsername || credentials.pass !== authPassword) {
+      res.set('WWW-Authenticate', 'Basic realm="Signet UI"');
+      return res.status(401).send('Authentication required');
+    }
+
+    next();
+  });
+}
+
 // Mount proxies at root - pathFilter handles routing
 app.use(sseProxy);
 app.use(apiProxy);
@@ -87,5 +107,6 @@ app.get('*', (_req, res) => {
 });
 
 app.listen(port, host, () => {
-  console.log(`Signet UI listening on http://${host}:${port} (proxying ${daemonUrl})`);
+  const authStatus = isAuthEnabled ? ' [Basic Auth Enabled]' : '';
+  console.log(`Signet UI listening on http://${host}:${port} (proxying ${daemonUrl})${authStatus}`);
 });
