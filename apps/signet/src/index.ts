@@ -1,7 +1,13 @@
 #!/usr/bin/env node
+import { config as dotenvConfig } from 'dotenv';
+import { resolve } from 'path';
 import 'websocket-polyfill';
 import { homedir } from 'os';
 import { join } from 'path';
+
+// Load .env from repository root (two levels up from this file's location)
+dotenvConfig({ path: resolve(__dirname, '../../../.env') });
+
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { addKey } from './commands/add.js';
