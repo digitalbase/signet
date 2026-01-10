@@ -4,7 +4,8 @@ import { resolve } from 'path';
 // In production (NODE_ENV=production), dotenv may not be installed
 if (process.env.NODE_ENV !== 'production') {
   try {
-    const dotenv = await import('dotenv');
+    // Use require for synchronous loading to avoid top-level await
+    const dotenv = require('dotenv');
     dotenv.config({ path: resolve(__dirname, '../../../../.env') });
   } catch {
     // dotenv not available, skip .env loading (production mode)
