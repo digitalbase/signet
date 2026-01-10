@@ -19,7 +19,6 @@ All runtime settings live in `signet.json`, located at `~/.signet-config/signet.
     "key": "auto-generated",
     "secret": "auto-generated-256-bit"
   },
-  "authPort": 3000,
   "baseUrl": "http://localhost:4174",
   "database": "sqlite://signet.db",
   "logs": "./signet.log",

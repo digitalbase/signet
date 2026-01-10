@@ -587,18 +587,13 @@ class Daemon {
 
     private async startWebAuth(): Promise<void> {
         // Support both new (SIGNET_*) and legacy (AUTH_*) env var names
-        const portEnv = process.env.SIGNET_PORT ?? process.env.AUTH_PORT;
-        const authPort = this.config.authPort ?? (portEnv ? parseInt(portEnv, 10) : undefined);
-        if (!authPort) {
-            logger.info('No authPort configured, HTTP server disabled');
-            return;
-        }
-
+        const port = process.env.SIGNET_PORT ? parseInt(process.env.SIGNET_PORT) : 3000;
         const baseUrl = this.config.baseUrl ?? process.env.EXTERNAL_URL ?? process.env.BASE_URL;
-        logger.info('Starting HTTP server', { port: authPort });
+        const bindHost = process.env.SIGNET_BIND_HOST ?? '0.0.0.0';
+        logger.info(`Starting HTTP server on ${bindHost}:${port}...`);
         this.httpServer = new HttpServer({
-            port: authPort,
-            host: this.config.authHost ?? process.env.SIGNET_HOST ?? process.env.AUTH_HOST ?? '0.0.0.0',
+            host: bindHost,
+            port,
             baseUrl,
             jwtSecret: this.config.jwtSecret,
             apiToken: this.config.apiToken,
@@ -616,7 +611,7 @@ class Daemon {
         });
 
         await this.httpServer.start();
-        await printServerInfo(authPort);
+        await printServerInfo(port);
     }
 
     private loadKeyMaterial(keyName: string, nsec: string): void {
