@@ -17,7 +17,7 @@ dotenvConfig({ path: path.resolve(__dirname, '../../.env') });
 const app = express();
 
 // Support both new (UI_*) and legacy (PORT/HOST) env var names
-const port = Number.parseInt(process.env.UI_PORT ?? process.env.PORT ?? '4174', 10);
+const port = Number.parseInt(process.env.UI_BIND_PORT ?? process.env.PORT ?? '4174', 10);
 const host = process.env.UI_BIND_ADDRESS ?? '0.0.0.0';
 const signetHost = process.env.SIGNET_HOST ?? 'localhost';
 const signetPort = process.env.SIGNET_PORT ?? '3000';
