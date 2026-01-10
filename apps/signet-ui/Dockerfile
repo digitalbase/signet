@@ -15,7 +15,7 @@ ENV NODE_ENV=production
 COPY --from=build /app/apps/signet-ui/dist ./dist
 COPY --from=build /app/apps/signet-ui/server.mjs ./server.mjs
 # Install server dependencies (pinned to match package.json)
-RUN npm install --no-save express@4 http-proxy-middleware@3
+RUN npm install --no-save express@4 http-proxy-middleware@3 basic-auth@2
 
 # Environment variables (can be overridden at runtime)
 ENV UI_PORT=4174
