@@ -36,6 +36,8 @@ services:
       UI_PORT: ${UI_PORT:-4174}
       UI_HOST: ${UI_HOST:-0.0.0.0}
       DAEMON_URL: ${DAEMON_URL:-http://signet:3000}
+      UI_AUTH_USERNAME: ${UI_AUTH_USERNAME:-}
+      UI_AUTH_PASSWORD: ${UI_AUTH_PASSWORD:-}
     ports:
       - "${UI_PORT:-100.113.147.36:4174}:${UI_PORT:-4174}"
 
