@@ -161,6 +161,29 @@ When `false` (default), the API is open for local development. Set to `true` for
 }
 ```
 
+### `SIGNET_API_TOKEN` (Environment Variable)
+
+API token for server-to-server authentication between the UI proxy and the daemon.
+
+- **Type**: string (hex-encoded)
+- **Required**: Yes (for UI deployment)
+- **Location**: Environment variable (not in config file)
+
+Both the daemon and UI server must be configured with the same token for secure communication. Generate a secure token:
+
+```bash
+# Generate a secure API token
+openssl rand -hex 32
+```
+
+Set this token in your environment or `.env` file:
+
+```bash
+SIGNET_API_TOKEN=your_generated_token_here
+```
+
+The daemon validates this token in the `X-API-Token` header sent by the UI proxy. Without a matching token, requests from the UI proxy will be rejected when `requireAuth` is enabled.
+
 ### `admin.secret`
 
 Secret included in the bunker connection URI. Used to validate connection attempts from NIP-46 clients.

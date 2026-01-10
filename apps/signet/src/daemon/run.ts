@@ -8,10 +8,6 @@ import { printServerInfo } from './lib/network.js';
 import { requestAuthorization } from './authorize.js';
 import type { DaemonBootstrapConfig } from './types.js';
 import { checkRequestPermission, type RpcMethod, type ApprovalType } from './lib/acl.js';
-import { TTLCache, getAllCacheStats } from './lib/ttl-cache.js';
-import { extractEventKind } from './lib/parse.js';
-import { toErrorMessage } from './lib/errors.js';
-import { logger, setLogEntryEmitter } from './lib/logger.js';
 import {
     KeyService,
     RequestService,
@@ -54,21 +50,23 @@ try {
 // Catch unhandled errors to prevent silent crashes and provide visibility
 
 process.on('uncaughtException', (error: Error) => {
-    logger.error('Uncaught exception', {
-        error: error.message,
-        stack: error.stack,
-    });
+    console.error('=== UNCAUGHT EXCEPTION ===');
+    console.error('Time:', new Date().toISOString());
+    console.error('Error:', error.message);
+    console.error('Stack:', error.stack);
+    console.error('==========================');
     // Don't exit - let the process continue if possible
     // The error is logged and we can investigate
 });
 
-process.on('unhandledRejection', (reason: unknown, _promise: Promise<unknown>) => {
-    const reasonStr = reason instanceof Error ? reason.message : String(reason);
-    const stack = reason instanceof Error ? reason.stack : undefined;
-    logger.error('Unhandled rejection', {
-        reason: reasonStr,
-        ...(stack ? { stack } : {}),
-    });
+process.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) => {
+    console.error('=== UNHANDLED REJECTION ===');
+    console.error('Time:', new Date().toISOString());
+    console.error('Reason:', reason);
+    if (reason instanceof Error) {
+        console.error('Stack:', reason.stack);
+    }
+    console.error('===========================');
     // Don't exit - just log for investigation
 });
 
@@ -81,35 +79,28 @@ const LOG_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const HEALTH_LOG_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
 // Rate limiting for auto-approval logging: 1 log per method per 5 seconds per app
-// Using TTLCache ensures automatic cleanup of old entries
 const AUTO_APPROVAL_LOG_INTERVAL_MS = 5 * 1000; // 5 seconds
-const autoApprovalLogTimestamps = new TTLCache<boolean>('auto-approval-log', {
-    ttlMs: AUTO_APPROVAL_LOG_INTERVAL_MS,
-    maxSize: 10_000, // Safety cap
-});
+const autoApprovalLogTimestamps = new Map<string, number>();
 
 function shouldLogAutoApproval(keyUserId: number, method: string): boolean {
     const key = `${keyUserId}:${method}`;
+    const now = Date.now();
+    const lastLog = autoApprovalLogTimestamps.get(key);
 
-    // If key exists and hasn't expired, don't log
-    if (autoApprovalLogTimestamps.has(key)) {
-        return false;
+    if (!lastLog || now - lastLog >= AUTO_APPROVAL_LOG_INTERVAL_MS) {
+        autoApprovalLogTimestamps.set(key, now);
+        return true;
     }
-
-    // Key doesn't exist or expired - log and set new entry
-    autoApprovalLogTimestamps.set(key, true);
-    return true;
+    return false;
 }
 
 function buildAuthorizationCallback(
     keyName: string,
     connectionManager: ConnectionManager
 ) {
-    const keyLogger = logger.child({ key: keyName });
-
     return async ({ id, method, pubkey, params }: PermitCallbackParams): Promise<boolean> => {
         const humanPubkey = npubEncode(pubkey);
-        keyLogger.info('Request received', { requestId: id, from: humanPubkey, method });
+        console.log(`[${keyName}] Request ${id} from ${humanPubkey} to ${method}`);
 
         const primaryParam = Array.isArray(params) ? params[0] : undefined;
         const result = await checkRequestPermission(
@@ -121,7 +112,9 @@ function buildAuthorizationCallback(
 
         if (result.permitted !== undefined) {
             const accessType = result.autoApproved ? 'auto-approved' : 'granted';
-            keyLogger.info(`Access ${result.permitted ? accessType : 'denied'} via ACL`, { npub: humanPubkey });
+            console.log(
+                `[${keyName}] Access ${result.permitted ? accessType : 'denied'} via ACL for ${humanPubkey}`
+            );
 
             // Log all permitted requests (with rate limiting)
             // This includes both trust-level auto-approvals and explicit permission grants
@@ -129,20 +122,20 @@ function buildAuthorizationCallback(
                 if (shouldLogAutoApproval(result.keyUserId, method)) {
                     // Log asynchronously to avoid blocking
                     logAutoApproval(result.keyUserId, method, primaryParam, keyName, id, pubkey, result.autoApproved, result.approvalType).catch(err => {
-                        logger.error('Failed to log auto-approval', { error: toErrorMessage(err) });
+                        console.error('Failed to log auto-approval:', err);
                     });
                 }
             }
 
             return result.permitted;
         }
-        keyLogger.info('No ACL decision, proceeding to authorization request', { npub: humanPubkey });
+        console.log(`[${keyName}] No ACL decision for ${humanPubkey}, proceeding to authorization request`);
 
         try {
             await requestAuthorization(connectionManager, keyName, pubkey, id, method, primaryParam);
             return true;
         } catch (error) {
-            keyLogger.info('Authorization rejected', { error: toErrorMessage(error) });
+            console.log(`[${keyName}] Authorization rejected: ${(error as Error).message}`);
             return false;
         }
     };
@@ -167,7 +160,18 @@ async function logAutoApproval(
     const paramsStr = typeof params === 'string' ? params : JSON.stringify(params);
 
     // Extract event kind for sign_event
-    const eventKind = method === 'sign_event' ? extractEventKind(paramsStr) : undefined;
+    let eventKind: number | undefined;
+    if (method === 'sign_event' && paramsStr) {
+        try {
+            const parsed = JSON.parse(paramsStr);
+            const event = Array.isArray(parsed) ? parsed[0] : parsed;
+            if (event && typeof event.kind === 'number') {
+                eventKind = event.kind;
+            }
+        } catch {
+            // Ignore parse errors
+        }
+    }
 
     // Create request record (so it appears in Activity page)
     await requestRepository.createAutoApproved({
@@ -276,9 +280,6 @@ class Daemon {
         this.eventService = new EventService();
         setEventService(this.eventService);
 
-        // Wire up logger to emit SSE events for real-time log streaming
-        setLogEntryEmitter((entry) => this.eventService.emitLogEntry(entry));
-
         // Initialize connection manager (generates bunker URIs and sends auth_url responses)
         this.connectionManager = new ConnectionManager({
             key: config.admin.key,
@@ -316,7 +317,7 @@ class Daemon {
             if (backend) {
                 backend.addAppSubscription(appId, relays);
             } else {
-                logger.warn('No backend for key, cannot create subscription', { key: keyName, source: 'nostrconnect' });
+                console.log(`[nostrconnect] Warning: No backend for key "${keyName}", cannot create subscription`);
             }
         });
 
@@ -329,11 +330,11 @@ class Daemon {
     }
 
     public async start(): Promise<void> {
-        logger.info('Connecting to relays...');
+        console.log('Connecting to relays...');
 
         // RelayPool connects lazily, but let's log what we're configured with
         const relayCount = this.pool.getRelays().length;
-        logger.info('Relay configuration', { count: relayCount, relays: this.pool.getRelays() });
+        console.log(`Configured with ${relayCount} relays: ${this.pool.getRelays().join(', ')}`);
 
         this.subscriptionManager.start();
         this.pool.startMonitoring(); // Start sleep/wake detection
@@ -341,7 +342,7 @@ class Daemon {
         // Handle pool events (sleep/wake, reset)
         this.pool.on((event) => {
             if (event.type === 'sleep-detected') {
-                logger.info('System wake detected, refreshing connections', { source: 'killswitch' });
+                console.log('[KillSwitch] System wake detected, refreshing connections');
                 this.adminCommandService?.refresh();
             }
             if (event.type === 'pool-reset') {
@@ -394,7 +395,7 @@ class Daemon {
         });
         this.eventService.emitAdminEvent(adminLogRepository.toActivityEntry(adminLog));
 
-        logger.info('Signet ready to serve requests');
+        console.log('Signet ready to serve requests.');
     }
 
     private startCleanupTasks(): void {
@@ -422,16 +423,18 @@ class Daemon {
         const uptimeHours = Math.floor(status.uptime / 3600);
         const uptimeMinutes = Math.floor((status.uptime % 3600) / 60);
 
-        logger.info('Health status', {
-            uptime: `${uptimeHours}h ${uptimeMinutes}m`,
-            heapMB: status.memory.heapMB,
-            rssMB: status.memory.rssMB,
-            sseClients: status.sseClients,
-            relays: `${status.relays.connected}/${status.relays.total}`,
-            activeKeys: status.keys.active,
-            subscriptions: status.subscriptions,
-            ...(status.lastPoolReset ? { lastPoolReset: status.lastPoolReset } : {}),
-        });
+        console.log('=== HEALTH STATUS ===');
+        console.log(`Time: ${new Date().toISOString()}`);
+        console.log(`Uptime: ${uptimeHours}h ${uptimeMinutes}m`);
+        console.log(`Memory: ${status.memory.heapMB}MB heap, ${status.memory.rssMB}MB RSS`);
+        console.log(`SSE clients: ${status.sseClients}`);
+        console.log(`Relay connections: ${status.relays.connected}/${status.relays.total}`);
+        console.log(`Active keys: ${status.keys.active}`);
+        console.log(`Managed subscriptions: ${status.subscriptions}`);
+        if (status.lastPoolReset) {
+            console.log(`Last pool reset: ${status.lastPoolReset}`);
+        }
+        console.log('====================');
     }
 
     private getHealthStatus(): HealthStatus {
@@ -459,7 +462,6 @@ class Daemon {
             subscriptions: this.subscriptionManager.getSubscriptionCount(),
             sseClients: this.eventService.getSubscriberCount(),
             lastPoolReset: this.lastPoolReset?.toISOString() ?? null,
-            caches: getAllCacheStats(),
         };
     }
 
@@ -471,11 +473,11 @@ class Daemon {
             const requestMaxAge = new Date(Date.now() - REQUEST_MAX_AGE_MS);
             const deletedRequests = await requestRepository.cleanupExpired(requestMaxAge);
             if (deletedRequests > 0) {
-                logger.info('Cleaned up expired requests', { count: deletedRequests, maxAge: '24 hours' });
+                console.log(`Cleaned up ${deletedRequests} expired request(s) older than 24 hours`);
                 statsChanged = true;
             }
         } catch (error) {
-            logger.error('Failed to cleanup old requests', { error: toErrorMessage(error) });
+            console.error('Failed to cleanup old requests:', error);
         }
 
         // Cleanup old logs (older than 30 days)
@@ -483,11 +485,11 @@ class Daemon {
             const logMaxAge = new Date(Date.now() - LOG_MAX_AGE_MS);
             const deletedLogs = await logRepository.cleanupExpired(logMaxAge);
             if (deletedLogs > 0) {
-                logger.info('Cleaned up old logs', { count: deletedLogs, maxAge: '30 days' });
+                console.log(`Cleaned up ${deletedLogs} log(s) older than 30 days`);
                 statsChanged = true;
             }
         } catch (error) {
-            logger.error('Failed to cleanup old logs', { error: toErrorMessage(error) });
+            console.error('Failed to cleanup old logs:', error);
         }
 
         // Cleanup old admin logs (older than 30 days)
@@ -495,10 +497,10 @@ class Daemon {
             const adminLogMaxAge = new Date(Date.now() - LOG_MAX_AGE_MS);
             const deletedAdminLogs = await adminLogRepository.cleanupExpired(adminLogMaxAge);
             if (deletedAdminLogs > 0) {
-                logger.info('Cleaned up old admin logs', { count: deletedAdminLogs, maxAge: '30 days' });
+                console.log(`Cleaned up ${deletedAdminLogs} admin log(s) older than 30 days`);
             }
         } catch (error) {
-            logger.error('Failed to cleanup old admin logs', { error: toErrorMessage(error) });
+            console.error('Failed to cleanup old admin logs:', error);
         }
 
         // Cleanup expired connection tokens
@@ -506,10 +508,10 @@ class Daemon {
             const tokenService = getConnectionTokenService();
             const deletedTokens = await tokenService.cleanupExpiredTokens();
             if (deletedTokens > 0) {
-                logger.info('Cleaned up expired connection tokens', { count: deletedTokens });
+                console.log(`Cleaned up ${deletedTokens} expired connection token(s)`);
             }
         } catch (error) {
-            logger.error('Failed to cleanup connection tokens', { error: toErrorMessage(error) });
+            console.error('Failed to cleanup connection tokens:', error);
         }
 
         // Emit stats update if anything changed
@@ -521,7 +523,7 @@ class Daemon {
     private async startConfiguredKeys(): Promise<void> {
         const activeKeys = this.keyService.getActiveKeys();
         const names = Object.keys(activeKeys);
-        logger.info('Starting keys', { keys: names.length > 0 ? names : ['(none)'] });
+        console.log('Starting keys:', names.join(', ') || '(none)');
 
         for (const [name, secret] of Object.entries(activeKeys)) {
             await this.startKey(name, secret);
@@ -550,7 +552,7 @@ class Daemon {
         if (secret.startsWith('nsec1')) {
             const decoded = nip19Decode(secret);
             if (decoded.type !== 'nsec') {
-                logger.warn('Cannot start key: Invalid nsec', { key: name });
+                console.log(`Cannot start key ${name}: Invalid nsec`);
                 return;
             }
             secretBytes = decoded.data as Uint8Array;
@@ -570,9 +572,9 @@ class Daemon {
 
             backend.start();
             this.backends.set(name, backend);
-            logger.info('Key online', { key: name });
+            console.log(`Key "${name}" online.`);
         } catch (error) {
-            logger.error('Failed to start key', { key: name, error: toErrorMessage(error) });
+            console.log(`Failed to start key ${name}: ${(error as Error).message}`);
         }
     }
 
@@ -581,7 +583,7 @@ class Daemon {
         if (backend) {
             backend.stop();
             this.backends.delete(name);
-            logger.info('Key locked', { key: name });
+            console.log(`Key "${name}" locked.`);
         }
     }
 
@@ -590,13 +592,22 @@ class Daemon {
         const port = process.env.SIGNET_BIND_PORT ? parseInt(process.env.SIGNET_BIND_PORT) : 3000;
         const baseUrl = this.config.baseUrl ?? process.env.UI_URL;
         const bindHost = process.env.SIGNET_BIND_ADDRESS ?? '0.0.0.0';
-        logger.info(`Starting HTTP server on ${bindHost}:${port}...`);
+        console.log(`Starting HTTP server on ${bindHost}:${port}...`);
+
+        // Load API token from environment variable
+        const apiToken = process.env.SIGNET_API_TOKEN;
+        if (apiToken) {
+            console.log('✓ Using API token from SIGNET_API_TOKEN environment variable');
+        } else {
+            console.log('⚠️  No SIGNET_API_TOKEN set - UI proxy authentication disabled');
+        }
+
         this.httpServer = new HttpServer({
             host: bindHost,
             port,
             baseUrl,
             jwtSecret: this.config.jwtSecret,
-            apiToken: this.config.apiToken,
+            apiToken,
             allowedOrigins: this.config.allowedOrigins ?? [],
             requireAuth: this.config.requireAuth ?? false,
             connectionManager: this.connectionManager,
@@ -617,7 +628,7 @@ class Daemon {
     private loadKeyMaterial(keyName: string, nsec: string): void {
         this.keyService.loadKeyMaterial(keyName, nsec);
         this.startKey(keyName, nsec).catch((error) => {
-            logger.error('Failed to start key', { key: keyName, error: toErrorMessage(error) });
+            console.log(`Failed to start key ${keyName}: ${(error as Error).message}`);
         });
     }
 
