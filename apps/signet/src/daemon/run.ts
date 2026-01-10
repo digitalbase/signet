@@ -593,12 +593,21 @@ class Daemon {
         const baseUrl = this.config.baseUrl ?? process.env.UI_URL;
         const bindHost = process.env.SIGNET_BIND_ADDRESS ?? '0.0.0.0';
         console.log(`Starting HTTP server on ${bindHost}:${port}...`);
+
+        // Load API token from environment variable
+        const apiToken = process.env.SIGNET_API_TOKEN;
+        if (apiToken) {
+            console.log('✓ Using API token from SIGNET_API_TOKEN environment variable');
+        } else {
+            console.log('⚠️  No SIGNET_API_TOKEN set - UI proxy authentication disabled');
+        }
+
         this.httpServer = new HttpServer({
             host: bindHost,
             port,
             baseUrl,
             jwtSecret: this.config.jwtSecret,
-            apiToken: this.config.apiToken,
+            apiToken,
             allowedOrigins: this.config.allowedOrigins ?? [],
             requireAuth: this.config.requireAuth ?? false,
             connectionManager: this.connectionManager,

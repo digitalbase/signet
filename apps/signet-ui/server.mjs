@@ -2,13 +2,10 @@ import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import auth from 'basic-auth';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-import { readFileSync, existsSync } from 'node:fs';
-import { homedir } from 'node:os';
-import auth from 'basic-auth';
 
 // Load .env from repository root (two levels up) in development
 // In production (NODE_ENV=production), dotenv may not be installed
@@ -35,21 +32,12 @@ const authUsername = process.env.UI_AUTH_USERNAME;
 const authPassword = process.env.UI_AUTH_PASSWORD;
 const isAuthEnabled = authUsername && authPassword;
 
-// Load API token from daemon config file
-let apiToken = null;
-const configPath = process.env.SIGNET_CONFIG ?? path.join(homedir(), '.signet', 'config.json');
-if (existsSync(configPath)) {
-  try {
-    const config = JSON.parse(readFileSync(configPath, 'utf8'));
-    apiToken = config.apiToken;
-    if (apiToken) {
-      console.log('✓ Loaded API token from daemon config');
-    }
-  } catch (err) {
-    console.warn('⚠️  Failed to load daemon config:', err.message);
-  }
+// Load API token from environment variable
+const apiToken = process.env.SIGNET_API_TOKEN;
+if (apiToken) {
+  console.log('✓ Using API token from SIGNET_API_TOKEN environment variable');
 } else {
-  console.warn('⚠️  Daemon config not found at', configPath);
+  console.warn('⚠️  No SIGNET_API_TOKEN set - requests to daemon may fail if authentication is required');
 }
 
 // Shared error handler for proxies
