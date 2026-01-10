@@ -20,7 +20,6 @@ All runtime settings live in `signet.json`, located at `~/.signet-config/signet.
     "secret": "auto-generated-256-bit"
   },
   "authPort": 3000,
-  "authHost": "0.0.0.0",
   "baseUrl": "http://localhost:4174",
   "database": "sqlite://signet.db",
   "logs": "./signet.log",
@@ -59,7 +58,7 @@ Keys are encrypted using AES-256-GCM with PBKDF2 key derivation (600,000 iterati
 All administration is done via the web UI. The following settings are required:
 
 - `baseUrl`: public URL where the daemon is reachable (required for request approval flow).
-- `authPort` / `authHost`: local interface for the Fastify REST API.
+- `authPort`: port for the REST API (binds to `0.0.0.0` to accept connections on all interfaces).
 
 ## Logging
 
@@ -214,16 +213,23 @@ Rate limits are per-IP address. After exceeding the limit, requests receive HTTP
 Docker Compose works out of the box with no `.env` file required. To customize settings, set these environment variables before running `docker compose`:
 
 ```bash
-SIGNET_PORT=3001 UI_PORT=8080 EXTERNAL_URL=https://signet.example.com docker compose up --build
+# Customize ports
+SIGNET_PORT=3001 UI_PORT=8080 docker compose up --build
+
+# Or set explicit URLs for complex networking
+DAEMON_URL=http://signet.local:3000 EXTERNAL_URL=https://ui.example.com docker compose up --build
 ```
 
 ### Daemon Variables (`signet`)
 
 | Variable | Description | Default |
 |----------|-------------|---------|
+| `SIGNET_BIND_HOST` | Network interface to bind to | `0.0.0.0` (all interfaces) |
+| `SIGNET_HOST` | Hostname where daemon is accessible | `localhost` (or `signet` in Docker) |
 | `SIGNET_PORT` | Port for the REST API | `3000` |
-| `SIGNET_HOST` | Host binding for the REST API | `0.0.0.0` |
-| `EXTERNAL_URL` | Public URL of the UI (for authorization flow) | `http://localhost:4174` |
+| `UI_HOST` | Hostname where UI is accessible (used for `EXTERNAL_URL` if not set) | `localhost` |
+| `UI_PORT` | Port where UI is accessible (used for `EXTERNAL_URL` if not set) | `4174` |
+| `EXTERNAL_URL` | Public URL of the UI (for authorization flow). Defaults to `http://${UI_HOST}:${UI_PORT}` | `http://localhost:4174` |
 | `DATABASE_URL` | SQLite database path | `file:~/.signet-config/signet.db` |
 | `SIGNET_LOCAL` | Set to `1` for local development (uses relative DB path) | (not set) |
 | `NODE_ENV` | Set to `development` for dev mode | `production` |
@@ -234,13 +240,31 @@ SIGNET_PORT=3001 UI_PORT=8080 EXTERNAL_URL=https://signet.example.com docker com
 
 | Variable | Description | Default |
 |----------|-------------|---------|
+| `UI_BIND_HOST` | Network interface to bind to | `0.0.0.0` (all interfaces) |
 | `UI_PORT` | Port for the React UI | `4174` |
-| `UI_HOST` | Host binding for the UI server | `0.0.0.0` |
-| `DAEMON_URL` | Internal URL to reach the daemon | `http://localhost:3000` |
+| `SIGNET_HOST` | Hostname where daemon is accessible (used for `DAEMON_URL` if not set) | `localhost` (or `signet` in Docker) |
+| `SIGNET_PORT` | Port where daemon is accessible (used for `DAEMON_URL` if not set) | `3000` |
+| `DAEMON_URL` | Internal URL to reach the daemon. Defaults to `http://${SIGNET_HOST}:${SIGNET_PORT}` | `http://localhost:3000` |
 
-The `EXTERNAL_URL` environment variable is particularly important for Docker deployments. It tells Signet where to redirect users for request approval. If not set in the config file, the daemon will use this environment variable.
+**How the services communicate:**
+- **UI → Daemon**: The UI uses `DAEMON_URL` to proxy API requests to the daemon
+- **Daemon → User**: The daemon uses `EXTERNAL_URL` to send authorization redirect URLs
 
-> **Note:** Legacy variable names (`AUTH_PORT`, `AUTH_HOST`, `BASE_URL`, `PORT`, `HOST`) are still supported for backward compatibility but are deprecated.
+**Network binding:**
+- Both services bind to `0.0.0.0` (all interfaces) by default
+- Use `SIGNET_BIND_HOST` and `UI_BIND_HOST` to bind to specific interfaces (e.g., `127.0.0.1` for localhost only, or a Tailscale IP like `100.x.x.x`)
+- The `*_HOST` and `*_PORT` variables are used to construct the URLs for service discovery, not for binding
+
+**Example use cases:**
+```bash
+# Bind to Tailscale interface only
+SIGNET_BIND_HOST=100.101.102.103 UI_BIND_HOST=100.101.102.103 docker compose up
+
+# Localhost only (not accessible from network)
+SIGNET_BIND_HOST=127.0.0.1 UI_BIND_HOST=127.0.0.1 docker compose up
+```
+
+> **Note:** The `authHost` config field is no longer used.
 
 All other settings are configured in `signet.json`.
 
