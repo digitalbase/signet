@@ -44,6 +44,7 @@ export interface HttpServerConfig {
     host: string;
     baseUrl?: string;
     jwtSecret?: string;
+    apiToken?: string;
     allowedOrigins: string[];
     requireAuth: boolean;
     connectionManager: ConnectionManager;
@@ -126,7 +127,11 @@ export class HttpServer {
     }
 
     private async setupRoutes(): Promise<void> {
-        const authMiddleware = createAuthMiddleware(this.fastify, this.config.requireAuth);
+        const authMiddleware = createAuthMiddleware(
+            this.fastify,
+            this.config.requireAuth,
+            this.config.apiToken
+        );
         const csrfMiddleware = createCsrfMiddleware();
         const rateLimitAuth = createRateLimitMiddleware('auth');
         const rateLimitKeys = createRateLimitMiddleware('keys');
