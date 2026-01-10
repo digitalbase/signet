@@ -1,5 +1,6 @@
 import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
+import rateLimit from 'express-rate-limit';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import auth from 'basic-auth';
@@ -31,6 +32,19 @@ const signetUrl = process.env.SIGNET_URL ?? `http://${signetHost}:${signetPort}`
 const authUsername = process.env.UI_AUTH_USERNAME;
 const authPassword = process.env.UI_AUTH_PASSWORD;
 const isAuthEnabled = authUsername && authPassword;
+
+// Rate limiting for basic auth failures (prevent brute force)
+// Allows 10 failed attempts per 15 minutes per IP
+const authRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // 10 attempts
+  skipSuccessfulRequests: true, // Only count failed auth attempts
+  standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
+  legacyHeaders: false, // Disable `X-RateLimit-*` headers
+  handler: (req, res) => {
+    res.status(429).send('Too many failed authentication attempts. Please try again later.');
+  },
+});
 
 // Load API token from environment variable
 const apiToken = process.env.SIGNET_API_TOKEN;
@@ -108,8 +122,12 @@ const apiProxy = createProxyMiddleware({
   }
 });
 
-// Basic authentication middleware
+// Basic authentication middleware with rate limiting
 if (isAuthEnabled) {
+  // Apply rate limiter first
+  app.use(authRateLimiter);
+
+  // Then check credentials
   app.use((req, res, next) => {
     const credentials = auth(req);
 

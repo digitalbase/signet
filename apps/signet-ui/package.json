@@ -20,6 +20,7 @@
     "debug": "^4.3.4",
     "dotenv": "^16.6.1",
     "express": "^4.19.2",
+    "express-rate-limit": "^7.5.0",
     "focus-trap-react": "^11.0.4",
     "html5-qrcode": "^2.3.8",
     "http-proxy-middleware": "^3.0.5",
