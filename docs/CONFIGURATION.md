@@ -185,7 +185,7 @@ Docker Compose works out of the box with no `.env` file required. To customize s
 SIGNET_PORT=3001 UI_PORT=8080 docker compose up --build
 
 # Or set explicit URLs for complex networking
-DAEMON_URL=http://signet.local:3000 EXTERNAL_URL=https://ui.example.com docker compose up --build
+SIGNET_URL=http://signet.local:3000 EXTERNAL_URL=https://ui.example.com docker compose up --build
 ```
 
 ### Daemon Variables (`signet`)
@@ -208,12 +208,12 @@ DAEMON_URL=http://signet.local:3000 EXTERNAL_URL=https://ui.example.com docker c
 |----------|-------------|---------|
 | `UI_BIND_ADDRESS` | Network interface to bind to | `0.0.0.0` (all interfaces) |
 | `UI_PORT` | Port for the React UI | `4174` |
-| `SIGNET_HOST` | Hostname where daemon is accessible (used for `DAEMON_URL` if not set) | `localhost` (or `signet` in Docker) |
-| `SIGNET_PORT` | Port where daemon is accessible (used for `DAEMON_URL` if not set) | `3000` |
-| `DAEMON_URL` | Internal URL to reach the daemon. Defaults to `http://${SIGNET_HOST}:${SIGNET_PORT}` | `http://localhost:3000` |
+| `SIGNET_HOST` | Hostname where daemon is accessible (used for `SIGNET_URL` if not set) | `localhost` (or `signet` in Docker) |
+| `SIGNET_PORT` | Port where daemon is accessible (used for `SIGNET_URL` if not set) | `3000` |
+| `SIGNET_URL` | Internal URL to reach the daemon. Defaults to `http://${SIGNET_HOST}:${SIGNET_PORT}` | `http://localhost:3000` |
 
 **How the services communicate:**
-- **UI → Daemon**: The UI uses `DAEMON_URL` to proxy API requests to the daemon
+- **UI → Daemon**: The UI uses `SIGNET_URL` to proxy API requests to the daemon
 - **Daemon → User**: The daemon uses `EXTERNAL_URL` to send authorization redirect URLs
 
 **Network binding:**
