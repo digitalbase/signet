@@ -1,20 +1,27 @@
+import { config as dotenvConfig } from 'dotenv';
 import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 import { readFileSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import auth from 'basic-auth';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Load .env from repository root (two levels up)
+dotenvConfig({ path: path.resolve(__dirname, '../../.env') });
 
 const app = express();
 
 // Support both new (UI_*) and legacy (PORT/HOST) env var names
 const port = Number.parseInt(process.env.UI_PORT ?? process.env.PORT ?? '4174', 10);
-const host = process.env.UI_HOST ?? process.env.HOST ?? '0.0.0.0';
-const daemonUrl = process.env.DAEMON_URL ?? 'http://localhost:3000';
+const host = process.env.UI_BIND_HOST ?? '0.0.0.0';
+const signetHost = process.env.SIGNET_HOST ?? 'localhost';
+const signetPort = process.env.SIGNET_PORT ?? '3000';
+const daemonUrl = process.env.DAEMON_URL ?? `http://${signetHost}:${signetPort}`;
 
 // Basic auth configuration (disabled by default)
 const authUsername = process.env.UI_AUTH_USERNAME;
