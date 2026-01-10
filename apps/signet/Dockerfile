@@ -60,8 +60,8 @@ WORKDIR /app/apps/signet
 
 # Environment variables (can be overridden at runtime)
 ENV DATABASE_URL="file:/app/config/signet.db"
-ENV SIGNET_PORT=3000
-ENV SIGNET_HOST=0.0.0.0
+ENV SIGNET_BIND_PORT=3000
+ENV SIGNET_BIND_ADDRESS=0.0.0.0
 
 EXPOSE 3000
 
