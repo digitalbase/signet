@@ -590,7 +590,7 @@ class Daemon {
     private async startWebAuth(): Promise<void> {
         // Support both new (SIGNET_*) and legacy (AUTH_*) env var names
         const port = process.env.SIGNET_BIND_PORT ? parseInt(process.env.SIGNET_BIND_PORT) : 3000;
-        const baseUrl = this.config.baseUrl ?? process.env.EXTERNAL_URL ?? process.env.BASE_URL;
+        const baseUrl = this.config.baseUrl ?? process.env.UI_URL;
         const bindHost = process.env.SIGNET_BIND_ADDRESS ?? '0.0.0.0';
         console.log(`Starting HTTP server on ${bindHost}:${port}...`);
         this.httpServer = new HttpServer({
