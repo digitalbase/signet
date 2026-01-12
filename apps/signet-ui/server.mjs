@@ -125,7 +125,7 @@ const apiProxy = createProxyMiddleware({
 // Basic authentication middleware with rate limiting
 if (isAuthEnabled) {
   // Apply rate limiter first
-  app.use(authRateLimiter);
+  //app.use(authRateLimiter);
 
   // Then check credentials
   app.use((req, res, next) => {
